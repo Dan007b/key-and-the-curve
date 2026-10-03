@@ -29,8 +29,11 @@
 
 // ---- Hardware configuration (confirmed by Danny, 2026-10-03) ----------------
 
-static constexpr int kPinSda = 21;
-static constexpr int kPinScl = 22;
+// All four signals sit on the same header as 5V/VIN and GND, so the whole
+// controller wires to one side of the board. The ESP32 can route I2C to any
+// GPIO, so moving off the default 21/22 costs nothing.
+static constexpr int kPinSda = 25;
+static constexpr int kPinScl = 26;
 static constexpr int kPinTrigger = 32;
 static constexpr int kPinResetKey = 33;
 

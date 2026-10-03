@@ -15,12 +15,14 @@ The game is fully playable on keyboard, so none of this is required to try it.
 
 ## Wiring
 
+Everything connects to **one header**: the side with the 5V (or VIN) and GND pins. On that header, GPIO32, 33, 25 and 26 sit next to each other.
+
 | BNO055 pin | ESP32 pin |
 |---|---|
-| VIN | 3V3 |
+| VIN | 3V3 if that header has it, otherwise 5V/VIN (see below) |
 | GND | GND |
-| SDA | GPIO21 |
-| SCL | GPIO22 |
+| SDA | GPIO25 |
+| SCL | GPIO26 |
 | ADR | leave unconnected (address 0x28) |
 
 | Button | ESP32 pin | Other leg |
@@ -28,11 +30,17 @@ The game is fully playable on keyboard, so none of this is required to try it.
 | Trigger | GPIO32 | GND |
 | Reset-key | GPIO33 | GND |
 
+### Powering the BNO055 from 5V/VIN
+
+The official DevKitC V4 has 3V3, GND and 5V all on this header, so use 3V3. Some clone boards (for example the 30-pin "DevKit V1" layout) put 3V3 on the other header, leaving only VIN and GND on this side.
+
+The Adafruit BNO055 accepts 3.3–5 V on its VIN pin and has its own 3.3 V regulator, so powering it from VIN is fine. The only thing to protect is the ESP32, whose pins are not 5 V tolerant. Before connecting SDA/SCL to the ESP32 the first time, power the breakout from VIN and measure SDA and SCL to GND with a multimeter: they should read about 3.3 V (pulled up to the breakout's regulator). If either reads about 5 V, do not connect it; power the breakout from 3V3 instead.
+
 The buttons need no resistors: the firmware enables the ESP32's internal pull-ups, so a pressed button reads LOW. The firmware also debounces them (20 ms).
 
 ### Why these pins
 
-- **GPIO21/22** are the ESP32's default I2C pins.
+- **GPIO25/26** carry I2C. The ESP32 can route I2C to any GPIO, and these two are on the same header as power and GND, right next to the buttons. The usual defaults, GPIO21/22, are on the other header.
 - **GPIO32/33** are plain I/O pins with internal pull-ups and no boot-time role.
 - **Avoid** GPIO6–11 (wired to the module's flash; using them crashes the board), GPIO0, 2, 5, 12 and 15 (strapping pins that affect boot), and GPIO34–39 (input-only, with no internal pull-up, so `INPUT_PULLUP` silently does nothing).
 

@@ -90,7 +90,7 @@ The core mechanic is holonomy. The key's orientation is stored in the marble's o
 
 Confirm every pin with Danny before using it.
 
-- **BNO055 over I2C.** Adafruit breakout (confirmed), default address 0x28; still scan the bus on boot and print what is found. It has the external crystal (confirmed), so enable `setExtCrystalUse(true)` by default. Default suggestion for pins: SDA = GPIO21, SCL = GPIO22 (the classic ESP32 Wire defaults; not yet confirmed). Never use GPIO6–11 (internal flash).
+- **BNO055 over I2C.** Adafruit breakout (confirmed), default address 0x28; still scan the bus on boot and print what is found. It has the external crystal (confirmed), so enable `setExtCrystalUse(true)` by default. Pins (confirmed): SDA = GPIO25, SCL = GPIO26, trigger = GPIO32, reset-key = GPIO33, all on the same header as 5V/VIN and GND so the controller wires to one side. Never use GPIO6–11 (internal flash).
 - **Trigger button** on a GPIO to GND, using `INPUT_PULLUP`.
 - **Reset-key button** on a GPIO to GND, using `INPUT_PULLUP`.
 - **No vibration motor** (confirmed). The firmware still accepts `V,<n>` and ignores it.
