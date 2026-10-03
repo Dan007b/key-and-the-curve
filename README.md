@@ -19,7 +19,7 @@ npm run dev     # http://localhost:5173 (use Chrome or Edge for Web Serial)
 npm test
 ```
 
-Firmware:
+Firmware (wiring, calibration and protocol are in [docs/HARDWARE.md](docs/HARDWARE.md)):
 
 ```powershell
 cd firmware
