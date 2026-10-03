@@ -6,7 +6,7 @@ Project brief and working instructions for Claude Code. Read this whole file bef
 
 A browser game for the "Beyond Euclid: Interactive Experiences in Impossible Geometries" challenge.
 
-The player holds a handheld controller: an ESP32-S3 with a BNO055 IMU. Tilting the controller rolls a marble through a maze laid out on a hyperbolic {5,4} tiling, drawn in the Poincaré disk model. A 4D tesseract "key" floats with the marble. Doors in the maze are gates, and a gate opens only when the key's orientation matches the gate's target orientation. Holding the trigger switches to twist mode, where wrist rotation turns the key in the XW, YW and ZW planes, so the player is physically rotating something through the fourth dimension.
+The player holds a handheld controller: an ESP32 (DevKitC V4) with a BNO055 IMU. Tilting the controller rolls a marble through a maze laid out on a hyperbolic {5,4} tiling, drawn in the Poincaré disk model. A 4D tesseract "key" floats with the marble. Doors in the maze are gates, and a gate opens only when the key's orientation matches the gate's target orientation. Holding the trigger switches to twist mode, where wrist rotation turns the key in the XW, YW and ZW planes, so the player is physically rotating something through the fourth dimension.
 
 The core mechanic is holonomy. The key's orientation is stored in the marble's own parallel-transported frame. Because the plane is hyperbolic, rolling the marble around a closed loop rotates that frame by an angle equal to the loop's enclosed area. The player can therefore change the key's orientation in two ways: by twisting it through 4D, or by taking a detour around a loop and letting the curvature turn it. Some gates require both. The game should teach the player that in curved space, the path you take changes the object you carry.
 
@@ -27,7 +27,7 @@ The core mechanic is holonomy. The key's orientation is stored in the marble's o
 ## 2. Environment and constraints
 
 - The developer is Danny, who works on Windows. Give shell commands for PowerShell.
-- The hardware is an ESP32-S3 dev board and a BNO055 breakout. There is no Raspberry Pi; the game runs on the laptop.
+- The hardware is an ESP32-DevKitC V4 (ESP32-WROOM-32D, classic ESP32, no native USB) and an Adafruit BNO055 breakout. There is no Raspberry Pi; the game runs on the laptop.
 - The game must also be fully playable with keyboard and mouse only (no hardware), so development and judging never depend on the controller.
 - Do not guess GPIO pins, the I2C address, or the board variant. Ask Danny before writing firmware pin constants.
 
@@ -35,9 +35,9 @@ The core mechanic is holonomy. The key's orientation is stored in the marble's o
 
 ### Firmware (`/firmware`)
 
-- Use PlatformIO with the Arduino framework, board `esp32-s3-devkitc-1` (confirm the exact board with Danny).
+- Use PlatformIO with the Arduino framework, board `esp32dev` (confirmed: ESP32-DevKitC V4).
 - Libraries: `adafruit/Adafruit BNO055` and `adafruit/Adafruit Unified Sensor`. Use `Preferences` (NVS) to store calibration.
-- Communicate over native USB CDC. Add the build flags `-DARDUINO_USB_CDC_ON_BOOT=1` and `-DARDUINO_USB_MODE=1`.
+- Communicate over the board's USB-to-UART bridge at **921600 baud** (the classic ESP32 has no native USB). 115200 would be ~75% saturated by the 100 Hz stream. The game must open Web Serial at the same baud, and should deassert DTR/RTS on connect so the DevKitC auto-reset circuit doesn't reset the board.
 
 ### Game (`/game`)
 
@@ -90,10 +90,10 @@ The core mechanic is holonomy. The key's orientation is stored in the marble's o
 
 Confirm every pin with Danny before using it.
 
-- **BNO055 over I2C.** Default suggestion: SDA = GPIO8, SCL = GPIO9 (the DevKitC Wire defaults). The address is 0x28, or 0x29 on many GY-BNO055 boards, so scan the bus on boot and print what is found.
+- **BNO055 over I2C.** Adafruit breakout (confirmed), default address 0x28; still scan the bus on boot and print what is found. It has the external crystal (confirmed), so enable `setExtCrystalUse(true)` by default. Default suggestion for pins: SDA = GPIO21, SCL = GPIO22 (the classic ESP32 Wire defaults; not yet confirmed). Never use GPIO6–11 (internal flash).
 - **Trigger button** on a GPIO to GND, using `INPUT_PULLUP`.
 - **Reset-key button** on a GPIO to GND, using `INPUT_PULLUP`.
-- **Optional vibration motor** on a GPIO through a logic-level MOSFET or NPN transistor, with a flyback diode, driven by LEDC PWM.
+- **No vibration motor** (confirmed). The firmware still accepts `V,<n>` and ignores it.
 
 ### Firmware behavior
 
