@@ -6,7 +6,7 @@ Project brief and working instructions for Claude Code. Read this whole file bef
 
 A browser game for the "Beyond Euclid: Interactive Experiences in Impossible Geometries" challenge.
 
-The player holds a handheld controller: an ESP32 (DevKitC V4) with a BNO055 IMU. Tilting the controller rolls a marble through a maze laid out on a hyperbolic {5,4} tiling, drawn in the Poincaré disk model. A 4D tesseract "key" floats with the marble. Doors in the maze are gates, and a gate opens only when the key's orientation matches the gate's target orientation. Holding the trigger switches to twist mode, where wrist rotation turns the key in the XW, YW and ZW planes, so the player is physically rotating something through the fourth dimension.
+The player holds a handheld controller: an ESP32 (DevKitC V4) with a BNO055 IMU. Tilting the controller rolls a marble through a maze laid out on a hyperbolic {5,4} tiling, drawn in the Poincaré disk model. A 4D tesseract "key" floats with the marble. Doors in the maze are gates, and a gate opens only when the key's orientation matches the gate's target orientation. Pressing the trigger (the ESP32's BOOT button) toggles twist mode on and off. In twist mode, wrist rotation turns the key in the XW, YW and ZW planes, so the player is physically rotating something through the fourth dimension.
 
 The core mechanic is holonomy. The key's orientation is stored in the marble's own parallel-transported frame. Because the plane is hyperbolic, rolling the marble around a closed loop rotates that frame by an angle equal to the loop's enclosed area. The player can therefore change the key's orientation in two ways: by twisting it through 4D, or by taking a detour around a loop and letting the curvature turn it. Some gates require both. The game should teach the player that in curved space, the path you take changes the object you carry.
 
@@ -90,9 +90,9 @@ The core mechanic is holonomy. The key's orientation is stored in the marble's o
 
 Confirm every pin with Danny before using it.
 
-- **BNO055 over I2C.** Adafruit breakout (confirmed), default address 0x28; still scan the bus on boot and print what is found. It has the external crystal (confirmed), so enable `setExtCrystalUse(true)` by default. Pins (confirmed): SDA = GPIO25, SCL = GPIO26, trigger = GPIO32, reset-key = GPIO33, all on the same header as 5V/VIN and GND so the controller wires to one side. Never use GPIO6–11 (internal flash).
-- **Trigger button** on a GPIO to GND, using `INPUT_PULLUP`.
-- **Reset-key button** on a GPIO to GND, using `INPUT_PULLUP`.
+- **BNO055 over I2C.** Adafruit breakout (confirmed), default address 0x28; still scan the bus on boot and print what is found. It has the external crystal (confirmed), so enable `setExtCrystalUse(true)` by default. Pins (confirmed): SDA = GPIO25, SCL = GPIO26, on the same header as 5V/VIN and GND so the controller wires to one side. Never use GPIO6–11 (internal flash).
+- **Trigger** is the DevKitC's own BOOT button (GPIO0, pressed = LOW); there are no other buttons (confirmed). Firmware reports the debounced held state; the **game** turns presses into a toggle: first press enters twist mode, second press exits. The game owns the mode so it can force it off (levels with twist disabled, level load).
+- **No reset-key button** (confirmed). Reset the key with R or an on-screen button.
 - **No vibration motor** (confirmed). The firmware still accepts `V,<n>` and ignores it.
 
 ### Firmware behavior
@@ -113,7 +113,7 @@ $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn\n
 | `gx..gz` | Gravity vector in the sensor frame, m/s². |
 | `wx..wz` | Gyro angular velocity, converted to **rad/s** in firmware (the Adafruit lib returns deg/s; verify and document). |
 | `cal` | Packed calibration status, `sys*1000 + gyr*100 + acc*10 + mag`. |
-| `btn` | Bitmask: bit0 = trigger, bit1 = reset-key. |
+| `btn` | Bitmask: bit0 = BOOT held; bit1 reserved, always 0. |
 
 - Debug lines start with `#` and are ignored by the parser.
 - **Host to device commands:**
@@ -184,7 +184,7 @@ For example, the rotation picked up by walking once around one {5,4} tile is 3π
 
 - **Tesseract.** 16 vertices at (±1, ±1, ±1, ±1) and 32 edges (vertex pairs that differ in exactly one coordinate).
 - **Orientation.** K_local is a 4×4 matrix in SO(4), stored in the marble's local frame.
-- **Twist mode** (trigger held). Let ω be the gyro rate in rad/s, mapped from device axes to 4D planes: device x → XW, device y → YW, device z → ZW. The mapping should be configurable. Each frame:
+- **Twist mode** (toggled on/off by trigger presses). Let ω be the gyro rate in rad/s, mapped from device axes to 4D planes: device x → XW, device y → YW, device z → ZW. The mapping should be configurable. Each frame:
   - K_local ← exp(dt · (ωₓE_xw + ω_yE_yw + ω_zE_zw)) · K_local
   - The E matrices are the antisymmetric plane generators. Computing the exponential by composing the three plane rotations is acceptable at small dt.
   - Reorthonormalize K every frame (Gram–Schmidt or SVD).
@@ -209,8 +209,8 @@ The `InputSource` interface looks like this:
 interface InputSource {
   tilt(): { x: number; y: number };      // -1..1, after deadzone + sensitivity
   angularVelocity(): [number, number, number]; // rad/s, for twist mode
-  trigger(): boolean;
-  resetKey(): boolean;
+  twistToggled(): boolean;                // true once per trigger press (rising edge), consumed on read
+  resetKey(): boolean;                    // keyboard R / on-screen button; serial has no reset button
   status(): { connected: boolean; calibration?: number; hz?: number };
   vibrate?(strength01: number): void;
 }
@@ -224,7 +224,7 @@ interface InputSource {
 - **KeyboardInput.**
   - Arrow keys or WASD tilt.
   - Shift + Q/A rotates in XW, Shift + W/S in YW, Shift + E/D in ZW.
-  - Space is the trigger; R resets the key.
+  - Space toggles twist mode (same as the BOOT button); R resets the key.
 - Show the input status in the HUD: connected or not, sample rate, and the calibration digits.
 
 ## 8. Levels

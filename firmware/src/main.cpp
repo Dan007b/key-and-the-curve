@@ -10,7 +10,8 @@
 //   wx..wz  gyro angular velocity, rad/s (the BNO055 reports deg/s; converted here)
 //   cal     sys*1000 + gyr*100 + acc*10 + mag, each 0..3, printed as a plain
 //           integer (so "300" means sys 0, gyr 3, acc 0, mag 0)
-//   btn     bit0 = trigger, bit1 = reset-key (1 = pressed)
+//   btn     bit0 = BOOT button held (debounced), bit1 = reserved, always 0
+//           (the game turns BOOT presses into the twist-mode toggle)
 //
 // Lines starting with '#' are debug/status output; the game ignores them.
 //
@@ -34,8 +35,11 @@
 // GPIO, so moving off the default 21/22 costs nothing.
 static constexpr int kPinSda = 25;
 static constexpr int kPinScl = 26;
-static constexpr int kPinTrigger = 32;
-static constexpr int kPinResetKey = 33;
+// The controller has no separate buttons: the DevKitC's own BOOT button
+// (GPIO0, external pull-up, pressed = LOW) is the trigger. GPIO0 is a strapping
+// pin only at reset; holding BOOT while the board resets enters the bootloader,
+// so don't hold it while plugging in.
+static constexpr int kPinTrigger = 0;
 
 // The Adafruit breakout has a 32.768 kHz crystal, which improves fusion
 // accuracy. Build with -DBNO055_EXT_CRYSTAL=0 for boards without one.
@@ -58,8 +62,16 @@ static constexpr uint32_t kSamplePeriodUs = 10000;
 static constexpr uint32_t kDebounceMs = 20;
 static constexpr uint32_t kStatsPeriodMs = 5000;
 static constexpr uint32_t kSensorRetryMs = 2000;
+// If fusion produces no orientation for this many sample periods (2 s), the
+// sensor is restarted. This catches a lost mode-switch write during init: the
+// Adafruit library ignores I2C write errors, and a BNO055 left in CONFIG mode
+// reports an all-zero quaternion forever.
+static constexpr uint32_t kFusionTimeoutSamples = 200;
 // The BNO055 needs ~650 ms after power-up before it answers on I2C.
 static constexpr uint32_t kBnoBootMs = 700;
+// Settling time after selecting the external crystal. Adafruit's examples wait
+// 1 s here; the chip's own power-on clock start-up is ~650 ms.
+static constexpr uint32_t kClockSettleMs = 700;
 
 static const char* const kPrefsNamespace = "bno055";
 static const char* const kPrefsKeyOffsets = "offsets";
@@ -94,7 +106,6 @@ struct DebouncedButton {
 };
 
 static DebouncedButton trigger(kPinTrigger);
-static DebouncedButton resetKey(kPinResetKey);
 
 // ---- Sensor ------------------------------------------------------------------
 
@@ -169,6 +180,16 @@ static void saveCalibration() {
     Serial.println(written == sizeof(offsets) ? "#cal saved to NVS" : "#cal not saved: NVS write failed");
 }
 
+// Prints the BNO055's operating mode and system status/error registers
+// (datasheet §4.3.58–4.3.60). Mode 12 = NDOF, 0 = CONFIG; status 5 = fusion
+// running; error 0 = none.
+static void printSensorState(const char* when) {
+    uint8_t status = 0, selfTest = 0, error = 0;
+    bno->getSystemStatus(&status, &selfTest, &error);
+    Serial.printf("#bno055 %s: mode %u, status %u, error %u\n",
+                  when, (unsigned)bno->getMode(), status, error);
+}
+
 // Finds and initializes the BNO055 in NDOF (9-axis fusion) mode.
 static bool initSensor() {
     const uint8_t addr = scanI2c();
@@ -186,10 +207,14 @@ static bool initSensor() {
     // begin() goes through Adafruit BusIO, which may touch the bus setup; make
     // sure the clock is still what we asked for.
     Wire.setClock(I2C_CLOCK_HZ);
-    loadCalibration();
+    // Switch the clock source first and let it settle before any other
+    // configuration: writes made while the chip changes clocks can be lost.
     bno->setExtCrystalUse(BNO055_EXT_CRYSTAL);
+    delay(kClockSettleMs);
+    loadCalibration();
     Serial.printf("#bno055 ok at 0x%02X, NDOF, ext crystal %s, i2c %u Hz\n",
                   addr, BNO055_EXT_CRYSTAL ? "on" : "off", (unsigned)I2C_CLOCK_HZ);
+    printSensorState("after init");
     return true;
 }
 
@@ -213,7 +238,7 @@ static bool streamSample() {
     uint8_t sys, gyr, acc, mag;
     bno->getCalibration(&sys, &gyr, &acc, &mag);
     const int cal = sys * 1000 + gyr * 100 + acc * 10 + mag;
-    const int btn = (trigger.pressed ? 1 : 0) | (resetKey.pressed ? 2 : 0);
+    const int btn = trigger.pressed ? 1 : 0;
 
     // Gravity has 0.01 m/s^2 resolution; gyro has 1/16 dps = 0.0011 rad/s.
     char line[160];
@@ -285,6 +310,7 @@ static uint32_t lastRetryMs = 0;
 static uint32_t statsStartMs = 0;
 static uint32_t statsSamples = 0;
 static uint32_t statsOverruns = 0;
+static uint32_t samplesWithoutFusion = 0;
 
 void setup() {
     Serial.begin(kBaud);
@@ -292,7 +318,6 @@ void setup() {
     Serial.println("#key-and-the-curve controller fw (esp32dev)");
 
     trigger.begin();
-    resetKey.begin();
 
     Wire.begin(kPinSda, kPinScl, I2C_CLOCK_HZ);
     while (millis() < kBnoBootMs) {
@@ -307,7 +332,6 @@ void setup() {
 void loop() {
     const uint32_t nowMs = millis();
     trigger.update(nowMs);
-    resetKey.update(nowMs);
     pollCommands();
 
     if (bno == nullptr) {
@@ -333,6 +357,15 @@ void loop() {
         }
         if (streamSample()) {
             ++statsSamples;
+            samplesWithoutFusion = 0;
+        } else if (++samplesWithoutFusion >= kFusionTimeoutSamples) {
+            printSensorState("no fusion output for 2 s");
+            Serial.println("#bno055 restarting sensor");
+            delete bno;
+            bno = nullptr;
+            samplesWithoutFusion = 0;
+            lastRetryMs = nowMs - kSensorRetryMs;  // retry on the next loop
+            return;
         }
     }
 

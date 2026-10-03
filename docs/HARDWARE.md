@@ -1,6 +1,6 @@
 # Hardware
 
-The controller is an ESP32 dev board with a BNO055 orientation sensor and two buttons. It streams orientation to the laptop over USB at 100 Hz; the game reads it with Web Serial.
+The controller is an ESP32 dev board with a BNO055 orientation sensor. The board's own BOOT button is the only button. It streams orientation to the laptop over USB at 100 Hz; the game reads it with Web Serial.
 
 The game is fully playable on keyboard, so none of this is required to try it.
 
@@ -10,12 +10,11 @@ The game is fully playable on keyboard, so none of this is required to try it.
 |---|---|
 | ESP32-DevKitC V4 (ESP32-WROOM-32D) | Classic ESP32. No native USB; it talks through an onboard USB-to-UART chip (CP2102 or CH340). |
 | Adafruit BNO055 breakout | 9-axis IMU with on-chip sensor fusion. Has its own I2C pull-ups and a 32.768 kHz crystal. |
-| 2 momentary push buttons | Trigger and reset-key. |
 | Micro-USB data cable | Some cables are charge-only and will not show a COM port. |
 
 ## Wiring
 
-Everything connects to **one header**: the side with the 5V (or VIN) and GND pins. On that header, GPIO32, 33, 25 and 26 sit next to each other.
+Everything connects to **one header**: the side with the 5V (or VIN) and GND pins.
 
 | BNO055 pin | ESP32 pin |
 |---|---|
@@ -25,10 +24,13 @@ Everything connects to **one header**: the side with the 5V (or VIN) and GND pin
 | SCL | GPIO26 |
 | ADR | leave unconnected (address 0x28) |
 
-| Button | ESP32 pin | Other leg |
-|---|---|---|
-| Trigger | GPIO32 | GND |
-| Reset-key | GPIO33 | GND |
+### The button
+
+There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the trigger. **Press once to enter 4D twist mode, press again to leave it.** The firmware only reports whether BOOT is held (debounced, 20 ms); the game turns presses into the on/off toggle, so it can also switch twist mode off itself (for example on levels where twisting is disabled).
+
+Don't hold BOOT while plugging the board in or pressing EN: GPIO0 is sampled at reset, and holding it low starts the bootloader instead of the firmware. Pressing it at any other time is safe.
+
+Resetting the key is done from the keyboard (R) or the on-screen button.
 
 ### Powering the BNO055 from 5V/VIN
 
@@ -36,13 +38,11 @@ The official DevKitC V4 has 3V3, GND and 5V all on this header, so use 3V3. Some
 
 The Adafruit BNO055 accepts 3.3–5 V on its VIN pin and has its own 3.3 V regulator, so powering it from VIN is fine. The only thing to protect is the ESP32, whose pins are not 5 V tolerant. Before connecting SDA/SCL to the ESP32 the first time, power the breakout from VIN and measure SDA and SCL to GND with a multimeter: they should read about 3.3 V (pulled up to the breakout's regulator). If either reads about 5 V, do not connect it; power the breakout from 3V3 instead.
 
-The buttons need no resistors: the firmware enables the ESP32's internal pull-ups, so a pressed button reads LOW. The firmware also debounces them (20 ms).
-
 ### Why these pins
 
-- **GPIO25/26** carry I2C. The ESP32 can route I2C to any GPIO, and these two are on the same header as power and GND, right next to the buttons. The usual defaults, GPIO21/22, are on the other header.
-- **GPIO32/33** are plain I/O pins with internal pull-ups and no boot-time role.
-- **Avoid** GPIO6–11 (wired to the module's flash; using them crashes the board), GPIO0, 2, 5, 12 and 15 (strapping pins that affect boot), and GPIO34–39 (input-only, with no internal pull-up, so `INPUT_PULLUP` silently does nothing).
+- **GPIO25/26** carry I2C. The ESP32 can route I2C to any GPIO, and these two are on the same header as power and GND. The usual defaults, GPIO21/22, are on the other header.
+- **GPIO0** is the BOOT button, already on the board. It is a strapping pin, which is fine for a button as long as it isn't held during reset (see above).
+- **Avoid** GPIO6–11 (wired to the module's flash; using them crashes the board), GPIO2, 5, 12 and 15 (strapping pins that affect boot), and GPIO34–39 (input-only, with no internal pull-up, so `INPUT_PULLUP` silently does nothing).
 
 ## Flashing (PowerShell)
 
@@ -63,8 +63,9 @@ If no COM port appears when the board is plugged in, check the USB chip printed 
 ```
 #key-and-the-curve controller fw (esp32dev)
 #i2c device at 0x28
-#cal none stored (calibrate, then send S)
+#cal loaded from NVS
 #bno055 ok at 0x28, NDOF, ext crystal on, i2c 100000 Hz
+#bno055 after init: mode 12, status 5, error 0
 $,0.99994,-0.00412,0.00897,0.00015,0.07,-0.17,9.80,0.0011,-0.0022,0.0000,300,0
 $,0.99994,-0.00412,0.00897,0.00015,0.07,-0.17,9.80,0.0000,-0.0011,0.0011,300,0
 ...
@@ -95,7 +96,7 @@ $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn
 | `gx..gz` | Gravity vector in the sensor frame, m/s² (0.01 resolution). |
 | `wx..wz` | Gyro angular velocity, **rad/s**. |
 | `cal` | Calibration status `sys*1000 + gyr*100 + acc*10 + mag`, each 0–3. It is a plain integer, so leading zeros are dropped: `300` means sys 0, gyr 3, acc 0, mag 0. `3333` is fully calibrated. |
-| `btn` | Bitmask: 1 = trigger held, 2 = reset-key held, 3 = both. |
+| `btn` | 1 while BOOT is held, else 0 (bit1 is reserved and always 0). The game toggles twist mode on each press. |
 
 **Gyro units.** The BNO055 powers up reporting deg/s, and the Adafruit library never changes that register; its `getVector(VECTOR_GYROSCOPE)` divides the raw value by 16 LSB per deg/s. The firmware multiplies by π/180, so the stream is in rad/s.
 
@@ -138,4 +139,5 @@ Set these in `platformio.ini` under `build_flags` if needed:
 | Garbled text in the monitor | Baud mismatch; the monitor must be at 921600. |
 | `Access is denied` when uploading | Another program (a monitor, the game, Arduino IDE) has the COM port open. |
 | Board resets when a program opens the port | The DevKitC's auto-reset circuit reacts to DTR/RTS. The game and `check_stream.py` keep both low to avoid this. |
+| `#bno055 ... restarting sensor` | Fusion produced no orientation for 2 s (the chip did not enter NDOF mode), so the firmware restarted it. Once at boot is harmless; repeatedly points to a loose I2C wire. In the state line, mode 12 = NDOF, status 5 = fusion running. |
 | `cal` stays at `0` for `mag` | Magnetic interference nearby; move away from metal and electronics and redo the figure-8. |
