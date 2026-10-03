@@ -13,8 +13,22 @@
         overflow: hidden;
       }
       #app {
+        position: relative;
         width: 100%;
         height: 100%;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+      .fps {
+        position: absolute;
+        top: 12px;
+        right: 16px;
+        font: 12px ui-monospace, Consolas, monospace;
+        color: #8fa3c8;
       }
     </style>
   </head>
