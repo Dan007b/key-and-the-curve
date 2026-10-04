@@ -103,6 +103,8 @@ export class ControllerInput implements InputSource {
   private lastVibrationTime = 0;
   /** The Bluetooth controller we are trying to get back after it dropped, if any. */
   private reconnecting: BluetoothDeviceLike | null = null;
+  /** True while a Bluetooth search (requestDevice) is running: it can take ~10 s on a first search. */
+  private searching = false;
 
   /** Whether this browser can use a USB cable (Web Serial). */
   static serialSupported(): boolean {
@@ -130,10 +132,16 @@ export class ControllerInput implements InputSource {
     // (Only await when there is something to close: the chooser must open while the click still counts.)
     if (this.connected() || this.reconnecting) await this.disconnect();
     const bluetooth = (navigator as unknown as { bluetooth: BluetoothLike }).bluetooth;
-    const device = await bluetooth.requestDevice({
-      filters: [{ services: [BLE_SERVICE] }, { name: BLE_NAME }],
-      optionalServices: [BLE_SERVICE],
-    });
+    this.searching = true;
+    let device: BluetoothDeviceLike;
+    try {
+      device = await bluetooth.requestDevice({
+        filters: [{ services: [BLE_SERVICE] }, { name: BLE_NAME }],
+        optionalServices: [BLE_SERVICE],
+      });
+    } finally {
+      this.searching = false;
+    }
     if (!device.gatt) throw new Error('This Bluetooth device has no GATT server.');
     // If the link drops (out of range, batteries sagging), reconnect on our own: no chooser needed for a device already picked.
     device.addEventListener('gattserverdisconnected', () => {
@@ -320,7 +328,7 @@ export class ControllerInput implements InputSource {
     return {
       label: link === 'bluetooth' ? 'Controller (Bluetooth)' : link === 'usb' ? 'Controller (USB)' : 'Controller',
       connected: link !== null,
-      note: !link && this.reconnecting ? 'reconnecting…' : undefined,
+      note: link ? undefined : this.searching ? 'searching…' : this.reconnecting ? 'reconnecting…' : undefined,
       calibration: this.latest?.calibration,
       hz: link ? hz : undefined,
       lossPercent: link === 'bluetooth' && hz + this.losses.length > 0 ? (100 * this.losses.length) / (hz + this.losses.length) : undefined,

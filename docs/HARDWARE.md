@@ -59,7 +59,7 @@ The battery holder goes across the DevKitC's **5V** pin (labelled VIN on some bo
 
 ## Bluetooth
 
-The firmware advertises as **PhaseEscape** as soon as it boots. In the game, click **Connect controller**, then **Bluetooth (wireless)**, and pick PhaseEscape. The desktop app picks it automatically. No pairing in Windows settings is needed; if you paired it there anyway, that's harmless. If the link drops (out of range, batteries sagging), the game reconnects by itself, trying for about 20 seconds; the corner shows "reconnecting…". It shows a loss percentage if samples go missing.
+The firmware advertises as **PhaseEscape** as soon as it boots. In the game, click **Connect controller**, then **Bluetooth (wireless)**. In Chrome or Edge a window opens: pick PhaseEscape. The **desktop app opens no window**: it searches by itself, the corner says "searching…" and then "connected". The first search after starting the app can take about 10 s on Windows; if nothing turns up within 20 s you get "Controller not found" with a **Search again** button, and a second search is usually instant. While the controller is connected to one window or tab it stops advertising, so no other window can find it. No pairing in Windows settings is needed; if you paired it there anyway, that's harmless. If the link drops (out of range, batteries sagging), the game reconnects by itself, trying for about 20 seconds; the corner shows "reconnecting…". It shows a loss percentage if samples go missing.
 
 Only one app can be connected at a time: close the other game window (or the desktop app) first.
 

@@ -324,8 +324,42 @@ function demoInput(): Autopilot | null {
 /** Connects the controller over Bluetooth or USB; reports failures (a cancelled chooser is not one). */
 function connectController(how: Link): void {
   const attempt = how === 'bluetooth' ? controller.connectBluetooth() : controller.connectSerial();
-  attempt.catch((err: unknown) => {
-    if (err instanceof DOMException && err.name === 'NotFoundError') return;
+  attempt.then(
+    () => hud.flash(how === 'bluetooth' ? 'CONTROLLER CONNECTED · BLUETOOTH' : 'CONTROLLER CONNECTED · USB', '#4dffa0'),
+    (err: unknown) => {
+      if (err instanceof DOMException && err.name === 'NotFoundError') {
+        // Bluetooth: the search ended without a controller. (The browser uses this same
+        // error for "chooser cancelled", so this also shows after a deliberate cancel,
+        // which is harmless.) USB: the port picker was cancelled; nothing to say.
+        if (how === 'bluetooth') showNotFound();
+        return;
+      }
+      showConnectError(how, err);
+    },
+  );
+}
+
+/** The Bluetooth search found nothing: what to check, and a button to search again (a click, as browsers require). */
+function showNotFound(): void {
+  const row = document.createElement('div');
+  row.className = 'connect-choices';
+  const again = document.createElement('button');
+  again.className = 'hud-button';
+  again.textContent = 'Search again';
+  again.addEventListener('click', () => {
+    hud.closeCard();
+    connectController('bluetooth');
+  });
+  row.appendChild(again);
+  pauseWith(
+    'Controller not found',
+    `The Bluetooth search ended without finding "PhaseEscape". Check that:\n• the controller is switched on (the board's red power light is lit);\n• it isn't connected to another Phase Escape window or browser tab: it can only talk to one at a time, and it can't be found while it is;\n• Bluetooth is on in Windows, and the controller is within a few metres.\nThe first search after starting can take about 10 seconds; searching again is usually instant.`,
+    'Close',
+    row,
+  );
+}
+
+function showConnectError(how: Link, err: unknown): void {
     pauseWith(
       'Could not connect the controller',
       how === 'bluetooth'
@@ -333,7 +367,6 @@ function connectController(how: Link): void {
         : `${String(err)}\nIs another program (a serial monitor) using the port?`,
       'OK',
     );
-  });
 }
 
 /** Lets you pick Bluetooth or a USB cable. Each button connects straight from its click (browsers require a click). */
@@ -354,7 +387,10 @@ function showConnect(): void {
   if (ControllerInput.serialSupported()) choice('USB cable', 'usb');
   pauseWith(
     'Connect the controller',
-    'Bluetooth: switch the controller on and pick "PhaseEscape". No pairing in Windows settings is needed.\nUSB: plug it in with a data cable (and take the batteries out, or switch them off, first).',
+    (navigator.userAgent.includes('Electron')
+      ? 'Bluetooth: switch the controller on and click Bluetooth. The app finds "PhaseEscape" by itself (no window opens); the corner says "searching…" and then "connected".'
+      : 'Bluetooth: switch the controller on, click Bluetooth, and pick "PhaseEscape" in the window that opens.') +
+      ' No pairing in Windows settings is needed.\nUSB: plug it in with a data cable (and take the batteries out, or switch them off, first).',
     'Cancel',
     row,
   );
