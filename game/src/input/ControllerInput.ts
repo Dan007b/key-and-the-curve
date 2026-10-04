@@ -1,6 +1,6 @@
 /**
  * The ESP32 + BNO055 controller, over Bluetooth Low Energy (Web Bluetooth) or
- * a USB cable (Web Serial). Chrome or Edge on localhost, or the desktop app.
+ * a USB cable (Web Serial). Chrome or Edge on localhost or HTTPS (GitHub Pages), or the desktop app.
  *
  * - connectBluetooth() / connectSerial() must run from a user gesture (the
  *   "Connect controller" card). One link at a time.
