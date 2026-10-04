@@ -54,7 +54,7 @@ Levels 2 and 6–8 come from a **level generator** (`game/src/game/generator.ts`
 
 ## Run it
 
-**Play online:** https://dan007b.github.io/key-and-the-curve/. Use Chrome or Edge on any computer, no install needed. The controller connects there too, because GitHub Pages is served over HTTPS. Every push to `main` rebuilds the site (`.github/workflows/pages.yml`).
+**Play online:** https://dan007b.github.io/phase-escape/. Use Chrome or Edge on any computer, no install needed. The controller connects there too, because GitHub Pages is served over HTTPS. Every push to `main` rebuilds the site (`.github/workflows/pages.yml`).
 
 **Windows desktop app:** `cd desktop`, `npm install`, `npm run package`, then double-click `desktop\out\Phase Escape-win32-x64\Phase Escape.exe`. Copy the whole folder to share it. It finds the controller by itself, over Bluetooth or USB.
 

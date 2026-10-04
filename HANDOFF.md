@@ -1,6 +1,6 @@
 # Handoff: The Key and the Curve → Phase Escape
 
-Paste this file (or point a new Claude Code chat at it) to continue. Project root: `C:\Users\bosak\Documents\Engineering\stomhacks 2026` (folder name has the typo "stomhacks"). GitHub: https://github.com/Dan007b/key-and-the-curve (branch `main`; commit and push at each milestone, ending commit messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Read `CLAUDE.md` (original brief + section 12 implementation notes) first.
+Paste this file (or point a new Claude Code chat at it) to continue. Project root: `C:\Users\bosak\Documents\Engineering\stomhacks 2026` (folder name has the typo "stomhacks"). GitHub: https://github.com/Dan007b/phase-escape (branch `main`; commit and push at each milestone, ending commit messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Read `CLAUDE.md` (original brief + section 12 implementation notes) first.
 
 ## Who / environment
 
