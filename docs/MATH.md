@@ -131,13 +131,41 @@ Twist steps are what you dial in: keys, the BOOT button, or turning the controll
 
 at game time t. Because that is a plain function of the clock, it is predictable: the game knows the next layer and how long until the shift, and for the last 1.5 s the shifter flickers towards its next colour (and fades in if that colour is yours).
 
-**The 4D body.** The inset shows a tesseract (16 vertices (±1, ±1, ±1, ±1), 32 edges) projected 4D → 3D by perspective along w, x′ = x·s/(d − w) with d = 3, then drawn with a 3D camera. It is rotated in the XW plane by your phase angle, so twisting visibly turns it through the fourth dimension and a pillar lap jumps it a fifth of a turn. Rotations in 4D happen in planes, not about axes; XW turns the x direction into w, which is why the inner and outer cubes appear to swap through each other.
+**The colour dial: why a lap changes your colour.** The ring in the corner is drawn to say exactly what happens. The colour wheel is painted on the world (in each room's reference frame), and the pointer is a needle you carry with your frame. Twisting turns the needle (counter-clockwise for +1). A lap round a pillar doesn't touch the needle. It parallel-transports your frame round a square whose corners are 72°, so you turn 108° at each corner, 432° = 360° + 72° in all. You come back facing the way you started, with the needle 72° off relative to the room. On screen that shows as the wheel turning 72° under the needle. The colours run counter-clockwise round the wheel, so the sector under the needle is always (twist + holonomy) mod 5 (`dialAngles` in `phase.ts`, checked in `levels.test.ts`).
 
-**Why it is fair.** A breadth-first search over (room, holonomy step, twist step, shards held) proves every level can be finished (`game/src/game/solver.ts`). Crossing a passage changes the holonomy step by that passage's jump, the carried frame's turn against the destination's reference frame, which is always a whole number of 72° steps. The same search shows that the twist-jammed levels (3 and 6) cannot be finished on the spanning tree alone, so you must loop, and that no level can be finished with its doors shut. Its shortest solution is then played by an autopilot with the real physics, for every level (`tests/levels.test.ts`).
+Straight lines are not what changes. Between two points of the hyperbolic plane there is exactly one geodesic (on a sphere, antipodal points have infinitely many). What depends on the route is the *orientation you arrive with*: two routes to the same room differ by the holonomy of the loop they make together, 72° per pillar between them.
 
-**Generated levels.** Levels 5–7 come from recipes (`game/src/game/generator.ts`). The exit goes in the room farthest from the start; doors go evenly along the shortest route to it, each a different colour from the last; shards go in dead ends, spread out farthest-first; hunters go in far rooms. A recipe can also open "pillar loops": all four passages around a pillar, so a single lap (one layer) is possible there. A candidate is kept only if the solver accepts it on all three counts above; otherwise the next seed is tried.
+**When hunters can hurt you.** Only hunters in your layer: they can see you (the game draws a line to each of them and counts them in the corner), chase you, and cost a life on contact, after which you have 2 s of protection. The rest are ghosts in other slices of w, and you pass right through them.
 
-## 9. Numerical care, in one table
+**Why it is fair.** A breadth-first search over (room, holonomy step, twist step, shards held) proves every level can be finished (`game/src/game/solver.ts`). Crossing a passage changes the holonomy step by that passage's jump, the carried frame's turn against the destination's reference frame, which is always a whole number of 72° steps. The same search shows that the twist-jammed levels (4 and 7) cannot be finished on the spanning tree alone, so you must loop, and that no level can be finished with its doors shut or its rifts unbridged. (It counts a rift as open: you can always bridge one from the room beside it.) Its shortest solution is then played by an autopilot with the real physics, for every level (`tests/levels.test.ts`).
+
+**Generated levels.** Levels 2 and 6–8 come from recipes (`game/src/game/generator.ts`). The exit goes in the room farthest from the start; doors and rifts go evenly along the shortest route to it, each door a different colour from the last, each rift's plank flat at a random view (15°–60° either way in each plane); shards go in dead ends, spread out farthest-first; hunters go in far rooms. A recipe can also open "pillar loops": all four passages around a pillar, so a single lap (one layer) is possible there. A candidate is kept only if the solver accepts it on all three counts above; otherwise the next seed is tried.
+
+## 9. Looking into the fourth dimension: rifts and planks
+
+Code: `game/src/math/four.ts` (`lookRotation`, `plankOrientation`, `shadowAxes`, `plankSmear`), `game/src/game/game.ts` (`updateLook`), `render/diskView.ts`, `render/keyView.ts`.
+
+The tesseract in the corner is your **view** into the fourth dimension. You turn it in two planes: by α in XW (the floor's left-right direction tips towards w) and by β in YW (its up-down direction tips towards w),
+
+  L(α, β) = R_yw(β) · R_xw(α),  with α, β ∈ [−90°, 90°].
+
+A **rift** is a passage you can't roll across. Over it floats a **plank**, a 4D box with half-extents (h_x, h_y, h_z, h_w) = (0.10, 0.32, 0.10, 0.30) in the rift's own frame (x along the crack, y across it). It is built to lie flat when seen from one particular view L₀ = L(α₀, β₀). From your view L you see it turned by
+
+  M = L · L₀⁻¹,
+
+and what reaches the floor is its orthographic shadow: the plank's corners Σ ±h_j e_j land at Σ ±h_j (M₀ⱼ, M₁ⱼ). So the shadow is the zonogon spanned by the four vectors g_j = h_j (M₀ⱼ, M₁ⱼ). At L = L₀, M = I, the z and w vectors vanish, and the shadow is the flat h_x × h_y rectangle spanning the crack: the bridge. Anywhere else, the w vector g_w smears the shadow sideways. The game draws the plank's w edges in gold, so you watch them shrink to nothing as you line it up.
+
+**Smear.** How far the shadow is from flat, as a fraction of the plank's size:
+
+  smear = ( |g_x ∓ (h_x, 0)| + |g_y ∓ (0, h_y)| + |g_z| + |g_w| ) / (h_x + h_y + h_z + h_w),
+
+taking the better sign for g_x and g_y (a rectangle looks the same flipped). Near the target, 1° off in XW gives a smear of about 0.011 and 1° off in YW about 0.006. A test scans the whole ±90° square of views in 1° steps: every view with smear < 0.08 lies within 8° (XW) and 14° (YW) of the target, so the only flat view is the right one. The rift is bridged once the smear stays under 0.04 for 0.2 s; within 0.1, if you let go of the controls, the view eases onto the target.
+
+This is a perspective puzzle in the spirit of Superliminal and The Witness, except the direction you can't see is w. The two angles are absolute, not accumulated, so the view is a point in a square and every plank has one answer. Rotations in 4D don't commute, though, and M = R_yw(β) R_xw(α − α₀) R_yw(−β₀) is not simply "the difference of the angles". That's why the shadow smears in a slanted way unless both angles are right.
+
+The inset shows the same view: the tesseract (16 vertices (±1, ±1, ±1, ±1), 32 edges) turned by L, plus a fixed 3D tilt, then projected 4D → 3D by perspective along w (x′ = x·s/(d − w), d = 3) and drawn with a 3D camera. Its gold w edges are the ones that tip into the floor as you turn.
+
+## 10. Numerical care, in one table
 
 | Where | Risk | Remedy |
 |---|---|---|

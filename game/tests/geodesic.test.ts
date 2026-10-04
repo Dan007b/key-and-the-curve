@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ORIGIN, apply, distance, expOrigin, minkowski } from '../src/math/lorentz';
+import { ORIGIN, apply, distance, expOrigin, minkowski, lorentzError } from '../src/math/lorentz';
 import type { Vec3 } from '../src/math/lorentz';
-import {
-  closestPointOnSegment,
-  distanceToSegment,
-  geodesicNormal,
-  geodesicPoint,
-  sampleGeodesic,
-  signedDistanceToGeodesic,
-} from '../src/math/geodesic';
+import { closestPointOnSegment, distanceToSegment, geodesicNormal, geodesicPoint, sampleGeodesic, signedDistanceToGeodesic, segmentFrame } from '../src/math/geodesic';
 import { maxDiff, randomIsometry, randomPoint, rng } from './helpers';
 
 /** Point at arclength s along the geodesic through a with unit tangent t, lifted by h along n. */
@@ -131,5 +124,21 @@ describe('segment tests', () => {
       expect(d).toBeLessThanOrEqual(distance(p, a) + 1e-12);
       expect(d).toBeLessThanOrEqual(distance(p, b) + 1e-12);
     }
+  });
+});
+
+describe('segmentFrame', () => {
+  it('is a Lorentz frame at the midpoint, x along the segment, y across it', () => {
+    const a = expOrigin(0.3, -0.8);
+    const b = expOrigin(1.1, 0.4);
+    const f = segmentFrame(a, b);
+    expect(lorentzError(f)).toBeLessThan(1e-12);
+    const m = apply(f, [0, 0, 1]);
+    expect(distance(m, a)).toBeCloseTo(distance(a, b) / 2, 12);
+    expect(distance(m, b)).toBeCloseTo(distance(a, b) / 2, 12);
+    // Walking along local +x reaches b; along local y leaves the segment's line.
+    const d = distance(a, b) / 2;
+    expect(distance(apply(f, expOrigin(d, 0)), b)).toBeLessThan(1e-9);
+    expect(Math.abs(signedDistanceToGeodesic(apply(f, expOrigin(0, 0.25)), geodesicNormal(a, b)))).toBeCloseTo(0.25, 9);
   });
 });

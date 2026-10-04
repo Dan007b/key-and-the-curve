@@ -9,7 +9,7 @@
  */
 
 import { distance, minkowski } from './lorentz';
-import type { ReadonlyVec3, Vec3 } from './lorentz';
+import type { Mat3, ReadonlyVec3, Vec3 } from './lorentz';
 
 /** Ordinary Euclidean cross product a × b. */
 export function cross(a: ReadonlyVec3, b: ReadonlyVec3): Vec3 {
@@ -127,4 +127,24 @@ export function closestPointOnSegment(p: ReadonlyVec3, a: ReadonlyVec3, b: Reado
 /** Hyperbolic distance from p to the geodesic segment [a, b]. */
 export function distanceToSegment(p: ReadonlyVec3, a: ReadonlyVec3, b: ReadonlyVec3): number {
   return distance(p, closestPointOnSegment(p, a, b));
+}
+
+/**
+ * The frame at the midpoint m of the segment a→b: an isometry taking O to m,
+ * its x axis to the direction towards b along the segment, and its y axis to
+ * the segment's normal n. Columns (t, n, m) with ⟨t,t⟩ = ⟨n,n⟩ = 1 and
+ * ⟨m,m⟩ = −1, all mutually orthogonal, so it is in SO⁺(2,1) up to the
+ * orientation of (t, n). Rifts draw their planks in this frame.
+ */
+export function segmentFrame(a: ReadonlyVec3, b: ReadonlyVec3): Mat3 {
+  const m = geodesicPoint(a, b, 0.5);
+  const n = geodesicNormal(a, b);
+  // Tangent towards b: project b onto m's tangent space (u + ⟨u,m⟩m), then normalise.
+  const bm = minkowski(b, m);
+  const t: Vec3 = [b[0] + bm * m[0], b[1] + bm * m[1], b[2] + bm * m[2]];
+  const k = 1 / Math.sqrt(minkowski(t, t));
+  t[0] *= k;
+  t[1] *= k;
+  t[2] *= k;
+  return [t[0], n[0], m[0], t[1], n[1], m[1], t[2], n[2], m[2]];
 }

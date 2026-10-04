@@ -4,6 +4,8 @@
  * - Arrow keys or WASD tilt the board. Holding the left mouse button on the
  *   disk also tilts it towards the pointer.
  * - Q / E step one layer down / up through the fourth dimension; Space steps up.
+ * - Holding Shift, the arrow keys / WASD turn your 4D view instead of
+ *   rolling: left/right in the XW plane, up/down in YW.
  *
  * Keys are read by physical position (KeyboardEvent.code), so the layout
  * doesn't matter.
@@ -19,6 +21,8 @@ export class KeyboardInput implements InputSource {
   private steps = 0;
   private tiltX = 0;
   private tiltY = 0;
+  private lookX = 0;
+  private lookY = 0;
   private pointer: { x: number; y: number } | null = null;
 
   constructor(private readonly diskElement: HTMLElement, private readonly diskRadiusPx: () => number) {
@@ -76,10 +80,21 @@ export class KeyboardInput implements InputSource {
       tx /= len;
       ty /= len;
     }
-    // Ramp towards the target so keyboard tilt isn't a harsh on/off step.
+    // With Shift held the same keys turn the 4D view, and the marble isn't tilted.
+    const shift = has('ShiftLeft', 'ShiftRight');
+    const [lx, ly] = shift ? [tx, ty] : [0, 0];
+    if (shift) [tx, ty] = [0, 0];
+    // Ramp towards the target so keyboard input isn't a harsh on/off step.
     const step = TILT_RAMP * dt;
-    this.tiltX += Math.max(-step, Math.min(step, tx - this.tiltX));
-    this.tiltY += Math.max(-step, Math.min(step, ty - this.tiltY));
+    const ramp = (v: number, to: number) => v + Math.max(-step, Math.min(step, to - v));
+    this.tiltX = ramp(this.tiltX, tx);
+    this.tiltY = ramp(this.tiltY, ty);
+    this.lookX = ramp(this.lookX, lx);
+    this.lookY = ramp(this.lookY, ly);
+  }
+
+  look(): { x: number; y: number } {
+    return { x: this.lookX, y: this.lookY };
   }
 
   tilt(): { x: number; y: number } {

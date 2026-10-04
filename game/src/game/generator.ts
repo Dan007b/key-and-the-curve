@@ -4,9 +4,10 @@
  *
  * The recipe's maze is carved as usual (maze.ts). Then:
  * - the exit goes in the room farthest from the start;
- * - doors go on the shortest route to the exit, evenly spaced, each a
- *   different colour from the one before (the first is never red, the
- *   starting layer, so you have to phase straight away);
+ * - doors and rifts go on the shortest route to the exit, evenly spaced (which
+ *   slots are rifts is random); each door is a different colour from the door
+ *   before (the first is never red, the starting layer, so you have to phase
+ *   straight away), and each rift's plank lies flat at a random 4D view;
  * - shards go in dead ends, spread out (greedy farthest-first);
  * - hunters spawn in far rooms, spread out, in the recipe's layers;
  * - optionally, "pillar loops": all four passages around a few pillars are
@@ -14,7 +15,8 @@
  *   pillar is marked. Levels that jam twisting rely on these.
  *
  * A candidate is kept only if the solver finds a solution, the doors matter
- * (with every door solid the level is impossible), and, for levels that jam
+ * (with every door solid the level is impossible), so do the rifts (with
+ * every rift unbridged it is impossible too), and, for levels that jam
  * twisting, the spanning tree alone is not enough (you must loop pillars).
  * Otherwise the next seed is tried. Everything is seeded, so a recipe always
  * produces the same level.
@@ -23,7 +25,7 @@
 import { distance } from '../math/lorentz';
 import { loadLevel } from './level';
 import type { HunterSpec, LevelSpec, LoadedLevel, ShardSpec } from './level';
-import type { DoorEdge } from './world';
+import type { DoorEdge, RiftEdge } from './world';
 import { passageKey, roomDistances } from './maze';
 import { LAYERS } from './phase';
 import { makeRng, shuffle } from './random';
@@ -37,6 +39,8 @@ export interface LevelRecipe {
   depth: number;
   extraOpenings: number;
   doors: number;
+  /** Rifts on the route to the exit, bridged by lining up a 4D plank. */
+  rifts?: number;
   shards: number;
   /** Pillars to open a lap around (and mark), spread out from the start. */
   pillarLoops?: number;
@@ -57,6 +61,9 @@ export interface GeneratedLevel {
   /** How many seeds were rejected before this one. */
   rejected: number;
 }
+
+/** Seconds of par allowed for lining up one rift's plank. */
+const RIFT_PAR = 15;
 
 /** Shortest route between two rooms through open passages. */
 function route(level: LoadedLevel, from: number, to: number): number[] {
@@ -172,18 +179,30 @@ export function tryRecipe(recipe: LevelRecipe, seed: number): { spec: LevelSpec;
   let exit = base.start;
   for (const [r, d] of fromStart) if (d > fromStart.get(exit)! || (d === fromStart.get(exit)! && r < exit)) exit = r;
 
-  // Doors: evenly spaced along the shortest route to the exit.
+  // Doors and rifts: evenly spaced along the shortest route to the exit.
   const path = route(bare, base.start, exit);
   const edges = path.length - 1;
-  if (edges < recipe.doors + 1) return null;
+  const riftCount = recipe.rifts ?? 0;
+  const gates = recipe.doors + riftCount;
+  if (edges < gates + 1) return null;
+  // (Only shuffled when there are rifts, so recipes without them draw the same random numbers as before.)
+  const slots = [...Array<boolean>(recipe.doors).fill(false), ...Array<boolean>(riftCount).fill(true)];
+  const isRift = riftCount > 0 ? shuffle(slots, rand) : slots;
   const doors: DoorEdge[] = [];
+  const rifts: RiftEdge[] = [];
   let colour = 0;
-  for (let k = 1; k <= recipe.doors; k++) {
-    const i = Math.round((k * edges) / (recipe.doors + 1)) - 1;
+  // A plank's view angle: 15°–60° either way in each plane, in 5° steps.
+  const angle = () => (rand() < 0.5 ? -1 : 1) * (15 + 5 * Math.floor(rand() * 10));
+  for (let k = 1; k <= gates; k++) {
+    const i = Math.round((k * edges) / (gates + 1)) - 1;
     const a = path[i];
-    const b = path[i + 1];
-    colour = (colour + 1 + Math.floor(rand() * (LAYERS - 1))) % LAYERS; // never the previous colour
-    doors.push({ tile: a, edge: tiling.tiles[a].neighbors.indexOf(b), layer: colour });
+    const edge = tiling.tiles[a].neighbors.indexOf(path[i + 1]);
+    if (isRift[k - 1]) {
+      rifts.push({ tile: a, edge, xw: angle(), yw: angle() });
+    } else {
+      colour = (colour + 1 + Math.floor(rand() * (LAYERS - 1))) % LAYERS; // never the previous colour
+      doors.push({ tile: a, edge, layer: colour });
+    }
   }
 
   // Shards: dead ends first (then the farthest rooms), spread out, random colours.
@@ -206,15 +225,17 @@ export function tryRecipe(recipe: LevelRecipe, seed: number): { spec: LevelSpec;
   if (hunterRooms.length < recipe.hunters.length) return null;
   const hunters: HunterSpec[] = recipe.hunters.map((h, i) => ({ tile: hunterRooms[i], ...h }));
 
-  const spec: LevelSpec = { ...base, exit, doors, shards, hunters };
+  const spec: LevelSpec = { ...base, exit, doors, ...(rifts.length > 0 ? { rifts } : {}), shards, hunters };
   const level = loadLevel(spec);
   const moves = solveLevel(level);
   if (moves === -1) return null;
-  // The doors must matter: with every door solid there is no way through.
+  // The doors must matter: with every door solid there is no way through. Same for the rifts.
   if (doors.length > 0 && solveLevel(level, { doorsSolid: true }) !== -1) return null;
+  if (rifts.length > 0 && solveLevel(level, { riftsClosed: true }) !== -1) return null;
   // Twisting jammed: the direct routes alone must not be enough.
   if (recipe.twist === false && solveLevel(level, { passable: maze.tree }) !== -1) return null;
-  spec.par = Math.max(30, Math.round((moves * (recipe.parPerMove ?? 4.5)) / 5) * 5);
+  // Par: per solver move, plus time to line up each rift's plank (the solver counts a rift as a plain passage).
+  spec.par = Math.max(30, Math.round((moves * (recipe.parPerMove ?? 4.5) + rifts.length * RIFT_PAR) / 5) * 5);
   return { spec, moves };
 }
 

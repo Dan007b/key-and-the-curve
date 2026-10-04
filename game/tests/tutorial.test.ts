@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/game/game';
-import { LEVELS, loadLevel } from '../src/game/level';
+import { levelNamed, loadLevel } from '../src/game/level';
 import { solveLevelPath } from '../src/game/solver';
 import { Tutorial } from '../src/game/tutorial';
 import type { TutorialTip } from '../src/game/tutorial';
 import { LAYER_NAMES } from '../src/game/phase';
-import { followSolution } from './bot';
+import { followSolution, idle, phaseTo } from './bot';
 
 describe('level 1 tutorial', () => {
   it('walks you through rolling, doors, shards and the portal, in the order you meet them', () => {
     const game = new Game();
-    game.load(LEVELS[0]);
-    const tutorial = new Tutorial();
+    game.load(levelNamed('Slip'));
+    const tutorial = new Tutorial('Slip');
     const tips: TutorialTip[] = [];
     const watch = () => {
       const tip = tutorial.update(game);
@@ -25,7 +25,7 @@ describe('level 1 tutorial', () => {
       update(dt, input);
       watch();
     };
-    expect(followSolution(game, solveLevelPath(loadLevel(LEVELS[0]))!)).toBe(true);
+    expect(followSolution(game, solveLevelPath(loadLevel(levelNamed('Slip')))!)).toBe(true);
     expect(game.status).toBe('won');
     expect(watch()).toBeNull();
     const ids = tips.map((t) => t.id);
@@ -39,5 +39,49 @@ describe('level 1 tutorial', () => {
       expect(t.text.toLowerCase()).toContain(LAYER_NAMES[t.layer!].toLowerCase());
       expect(t.anchor).not.toBeNull();
     }
+  });
+});
+
+describe('Rift and Hunted tips', () => {
+  it('Rift: explains the 4D plank while you line it up, until the first bridge', () => {
+    const spec = levelNamed('Rift');
+    const game = new Game();
+    game.load(spec);
+    const tutorial = new Tutorial('Rift');
+    const ids = new Set<string>();
+    const update = game.update.bind(game);
+    game.update = (dt, input) => {
+      update(dt, input);
+      const tip = tutorial.update(game);
+      if (tip) ids.add(tip.id);
+      if (tip?.id === 'rift') expect(game.riftFocus).not.toBeNull();
+    };
+    expect(followSolution(game, solveLevelPath(loadLevel(spec))!)).toBe(true);
+    expect(ids.has('rift')).toBe(true);
+    expect(ids.has('portal')).toBe(true);
+    expect(ids.has('roll')).toBe(false); // Slip already taught rolling
+  });
+
+  it('Hunted: warns you when a hunter of your colour is close, then explains it is a ghost once you phase', () => {
+    const game = new Game();
+    game.load(levelNamed('Hunted'));
+    const tutorial = new Tutorial('Hunted');
+    const hunter = game.hunters[0];
+    expect(tutorial.update(game)?.id ?? null).not.toBe('ghost');
+    // Bring the hunter close, in your colour.
+    phaseTo(game, hunter.layer);
+    hunter.position = game.level.tiling.tiles[game.level.tiling.tiles[game.room].neighbors.find((n) => n !== -1)!].center;
+    const warn = tutorial.update(game);
+    expect(warn?.id).toBe('hunter');
+    expect(warn?.text).toContain(LAYER_NAMES[hunter.layer].toLowerCase());
+    // Phase away: now it's a ghost, and the tip says so for a few seconds.
+    phaseTo(game, (hunter.layer + 2) % 5);
+    expect(tutorial.update(game)?.id).toBe('ghost');
+    idle(game, 5.5);
+    expect(tutorial.update(game)?.id ?? null).not.toBe('ghost');
+  });
+
+  it('other levels have no tips', () => {
+    expect(new Tutorial('Escape').active()).toBe(false);
   });
 });

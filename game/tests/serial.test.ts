@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate } from '../src/input/serialProtocol';
+import { DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate, BootButton, BOOT_HOLD_MS } from '../src/input/serialProtocol';
 
 const GOOD = '$,0.99994,-0.00412,0.00897,0.00015,0.07,-0.17,9.80,0.0011,-0.0022,0.0000,3333,1';
 
@@ -128,5 +128,30 @@ describe('yawRate (turning the controller like a dial)', () => {
   it('ignores tilting and small wobbles', () => {
     expect(yawRate([1.5, -1.0, 0], [0, 0, 9.8])).toBe(0);
     expect(yawRate([0, 0, 0.2], [0, 0, 9.8])).toBe(0);
+  });
+});
+
+describe('BOOT button: tap to phase, hold to look into 4D', () => {
+  it('a short press is one tap, released', () => {
+    const b = new BootButton();
+    b.update(true, 0);
+    b.update(true, 100);
+    expect(b.holding()).toBe(false);
+    expect(b.takeTaps()).toBe(0); // counted on release, not on press
+    b.update(false, 150);
+    expect(b.takeTaps()).toBe(1);
+    expect(b.takeTaps()).toBe(0);
+  });
+
+  it('a long press is looking, not a tap', () => {
+    const b = new BootButton();
+    b.update(true, 0);
+    b.update(true, BOOT_HOLD_MS - 10);
+    expect(b.holding()).toBe(false);
+    b.update(true, BOOT_HOLD_MS + 10);
+    expect(b.holding()).toBe(true);
+    b.update(false, 900);
+    expect(b.holding()).toBe(false);
+    expect(b.takeTaps()).toBe(0);
   });
 });

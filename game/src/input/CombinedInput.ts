@@ -29,6 +29,14 @@ export class CombinedInput implements InputSource {
     return this.keyboard.phaseRate() + this.serial.phaseRate();
   }
 
+  /** Turning the 4D view: keyboard (Shift + arrows) and controller (BOOT held + tilt) add up, clamped. */
+  look(): { x: number; y: number } {
+    const k = this.keyboard.look();
+    const s = this.serial.look();
+    const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+    return { x: clamp(k.x + s.x), y: clamp(k.y + s.y) };
+  }
+
   status(): InputStatus {
     return this.serial.connected() ? this.serial.status() : this.keyboard.status();
   }

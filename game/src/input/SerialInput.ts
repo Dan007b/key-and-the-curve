@@ -7,12 +7,12 @@
  * - Parses lines robustly (partial chunks, '#' debug lines, garbage dropped).
  * - Tilt comes from the gravity vector relative to a captured "level"
  *   reference (setLevel()). Turning the controller about that vertical, like
- *   a dial, slides you through the fourth dimension; each BOOT press steps
- *   up one layer.
+ *   a dial, slides you through the fourth dimension; a BOOT tap steps up one
+ *   layer, and holding BOOT makes tilt turn your 4D view instead of rolling.
  */
 
 import type { InputSource, InputStatus } from './InputSource';
-import { DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate } from './serialProtocol';
+import { BootButton, DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate } from './serialProtocol';
 import type { Sample, TiltSettings } from './serialProtocol';
 
 /** Must match kBaud in firmware/src/main.cpp. */
@@ -46,8 +46,7 @@ export class SerialInput implements InputSource {
   private latest: Sample | null = null;
   private reference: [number, number, number] = [0, 0, 1];
   private recentGravity: [number, number, number][] = [];
-  private lastButtons = 0;
-  private toggles = 0;
+  private readonly boot = new BootButton();
   private sampleTimes: number[] = [];
   private lastVibration = -1;
   private lastVibrationTime = 0;
@@ -117,10 +116,8 @@ export class SerialInput implements InputSource {
     this.latest = s;
     this.recentGravity.push(s.gravity);
     if (this.recentGravity.length > 20) this.recentGravity.shift();
-    // Rising edge of the BOOT button: one layer up.
-    if ((s.buttons & 1) === 1 && (this.lastButtons & 1) === 0) this.toggles++;
-    this.lastButtons = s.buttons;
     const now = performance.now();
+    this.boot.update((s.buttons & 1) === 1, now);
     this.sampleTimes.push(now);
     while (this.sampleTimes.length > 0 && now - this.sampleTimes[0] > 1000) this.sampleTimes.shift();
   }
@@ -133,9 +130,21 @@ export class SerialInput implements InputSource {
     return true;
   }
 
+  /** Rolling tilt; zero while BOOT is held (then tilt turns your 4D view). */
   tilt(): { x: number; y: number } {
-    if (!this.latest) return { x: 0, y: 0 };
+    if (!this.latest || this.boot.holding()) return { x: 0, y: 0 };
     return tiltFromGravity(this.latest.gravity, this.reference, this.tiltSettings);
+  }
+
+  /** While BOOT is held, tilt turns your 4D view: left/right in XW, forward/back in YW. */
+  look(): { x: number; y: number } {
+    if (!this.latest || !this.boot.holding()) return { x: 0, y: 0 };
+    return tiltFromGravity(this.latest.gravity, this.reference, this.tiltSettings);
+  }
+
+  /** Whether BOOT is being held to look into 4D. */
+  looking(): boolean {
+    return this.boot.holding();
   }
 
   /** Degrees per second through the fourth dimension, from turning the controller like a dial. */
@@ -145,11 +154,9 @@ export class SerialInput implements InputSource {
     return ((w * 180) / Math.PI) * this.phaseGain * (this.phaseInvert ? -1 : 1);
   }
 
-  /** One layer up per BOOT press. */
+  /** One layer up per BOOT tap. */
   phaseSteps(): number {
-    const n = this.toggles;
-    this.toggles = 0;
-    return n;
+    return this.boot.takeTaps();
   }
 
   status(): InputStatus {

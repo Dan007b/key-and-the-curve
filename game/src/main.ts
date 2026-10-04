@@ -12,7 +12,7 @@ import { KeyboardInput } from './input/KeyboardInput';
 import { SerialInput } from './input/SerialInput';
 import { CombinedInput } from './input/CombinedInput';
 import { Game, LIVES } from './game/game';
-import { LEVELS } from './game/level';
+import { LEVELS, levelIndex as indexOfLevel } from './game/level';
 import { LAYERS, LAYER_CSS, LAYER_NAMES, LAYER_RGB, holonomySteps, mod } from './game/phase';
 import { Autopilot, waypoints } from './game/autopilot';
 import { roomDistances } from './game/maze';
@@ -23,6 +23,7 @@ import { Tutorial } from './game/tutorial';
 import { TABLE_SIZE, formatTime, insertRun, loadPlayerName, loadScores, rankOf, savePlayerName, saveScores, starsFor } from './scores';
 import type { ScoreEntry } from './scores';
 import { loadSettings, saveSettings, settingsForm } from './settings';
+import { holonomyFigure } from './render/explain';
 import type { Settings } from './settings';
 
 const app = document.getElementById('app');
@@ -48,7 +49,7 @@ let settings = loadSettings();
 let levelIndex = 0;
 let paused = true;
 let markedPosts = new Set<number>();
-/** Level 1's tutorial tips (null on other levels, or when turned off). */
+/** Tutorial tips for the teaching levels (null on other levels, or when turned off). */
 let tutorial: Tutorial | null = null;
 /** Pillars to pulse after a loop closes, with the game time their highlight ends. */
 const loopPillars = new Map<number, number>();
@@ -77,7 +78,8 @@ function startLevel(index: number, showIntro = true): void {
   loopPillars.clear();
   hud.clearLabels();
   hud.setLevel(index, spec.name, spec.hint);
-  tutorial = index === 0 && settings.tutorial ? new Tutorial() : null;
+  tutorial = settings.tutorial ? new Tutorial(spec.name) : null;
+  if (tutorial && !tutorial.active()) tutorial = null;
   hud.setTip(null);
   paused = true;
   if (showIntro) {
@@ -191,7 +193,9 @@ function showHelp(): void {
     ['Arrows / WASD / drag', 'Roll the marble (or tilt the controller)'],
     ['Q / E', 'Phase down / up one layer through the fourth dimension'],
     ['Space', 'Phase up one layer'],
-    ['Controller', 'Tilt to roll; turn it like a dial to phase; BOOT = phase up'],
+    ['Shift + arrows / WASD', 'Turn your 4D view (the tesseract): left/right in XW, up/down in YW'],
+    ['F', 'Straighten your 4D view'],
+    ['Controller', 'Tilt to roll; turn it like a dial to phase; tap BOOT = phase up; hold BOOT and tilt = turn your 4D view'],
     ['R', 'Restart the level'],
     ['T · M · N · H', 'Trail · sound · music · this help'],
   ];
@@ -200,14 +204,45 @@ function showHelp(): void {
     tr.insertCell().textContent = k;
     tr.insertCell().textContent = v;
   }
+  const extra = document.createElement('div');
+  const section = (title: string, ...paras: string[]) => {
+    if (title) {
+      const h = document.createElement('h2');
+      h.className = 'help-heading';
+      h.textContent = title;
+      extra.appendChild(h);
+    }
+    for (const t of paras) {
+      const p = document.createElement('p');
+      p.textContent = t;
+      extra.appendChild(p);
+    }
+  };
+  extra.appendChild(table);
+  section(
+    'When can a hunter hurt me?',
+    'Only when it is the same colour as you. Then it can see you (a line joins you to it), it chases you, and touching you costs a life. In any other colour it is a faint ghost that cannot see or touch you. The top right says how many hunters can see you right now. When one is close, change colour.',
+  );
+  section(
+    'Why does a lap round a pillar change my colour?',
+    'You carry a needle that you never turn yourself: it is the white pointer on the ring in the corner, and the colour under it is your colour. Q and E turn the needle. A lap round a pillar turns it too, because this space is curved:',
+  );
+  extra.appendChild(holonomyFigure());
+  section(
+    '',
+    'The four rooms round a pillar make a square whose corners are 72°, not 90°. Going round it you turn 108° at each corner, 432° in all: one full turn plus 72°. You end up facing the way you started, but the needle is 72° off, which is one colour. On the ring, the colour wheel turns under the needle. Counter-clockwise laps go down a colour, clockwise laps go up.',
+    'Straight lines here behave differently from on a sphere: between two points there is exactly one straight path. What changes is how you arrive. Two different routes to the same room bring you there turned differently, by 72° for every pillar between the two routes.',
+  );
+  section(
+    'What does the tesseract do?',
+    'It is your view into the fourth dimension. Hold Shift and use the arrows (or hold BOOT and tilt) to turn it. Planks over rifts are four-dimensional, so you only see their shadows; turning your view moves the shadows. When a plank lies flat across its rift, it becomes a bridge.',
+  );
   pauseWith(
     'How to play',
-    'Grab every shard ◆, then roll into the portal. Hunters take a life when they touch you; lose three and you are caught.\n' +
-      'The maze has a fourth dimension: five layers, five colours. You exist in one at a time. Doors open only in their own colour, shards can only be grabbed in theirs, and hunters can only see and touch you in theirs. Phase to slip through doors and away from hunters.\n' +
-      'Shifters are hunters that change colour every few seconds: the dashed ring around one is the colour it moves into next, and it flickers just before it goes.\n' +
-      'Space is curved here. Roll once around a pillar and you come back one layer over (clockwise = up, counter-clockwise = down): the curvature itself moves you through the fourth dimension.',
+    'Grab every shard ◆, then roll into the portal. Lose three lives to the hunters and you are caught.\n' +
+      'The maze has a fourth dimension: five layers, five colours. You are in one at a time. Doors open only in their own colour, and shards can only be grabbed in theirs. Shifters are hunters that change colour every few seconds: the dashed ring around one is the colour it moves into next.',
     'Close',
-    table,
+    extra,
     true,
   );
 }
@@ -219,27 +254,30 @@ function showSettings(): void {
 /** The holonomy moment: the first time a loop shifts your layer. */
 function showAha(degrees: number, to: number): void {
   if (demo) window.setTimeout(() => hud.closeCard(), 9000);
+  const extra = document.createElement('div');
+  extra.appendChild(holonomyFigure());
   const formula = document.createElement('div');
   formula.className = 'formula';
-  formula.textContent = 'turn = (4 − 2)·180° − 4·72° = 72° = one layer';
-  pauseWith(
-    'Space just moved you through the fourth dimension',
-    `You rolled once around the pillar and came back ${LAYER_NAMES[to]}, without touching the controls. That lap turned you ${degrees > 0 ? '+' : ''}${degrees}°.\n` +
-      'The four rooms around a pillar form a square. In flat space its corners would be 90°, but in this curved space each is only 72°. Anything carried around a closed path comes back turned by the area it encloses:',
-    'Back to the maze',
-    formula,
-  );
+  formula.textContent = '4 × 108° − 360° = 72° = (4 − 2)·180° − 4·72°, the square\'s area';
   const more = document.createElement('p');
   more.textContent =
-    'Five laps make 360°, a full trip around the fourth dimension. This is holonomy: in curved space, the path you take changes you. Clockwise laps go up a layer, counter-clockwise go down.';
-  formula.after(more);
+    'Your colour is just the colour under your needle (the white pointer on the ring in the corner), so 72° is exactly one colour: watch the wheel turn under the needle. Counter-clockwise laps go down a colour, clockwise laps go up, and five laps bring you all the way round. This is holonomy: in curved space, the path you take turns what you carry.';
+  extra.append(formula, more);
+  pauseWith(
+    'The curvature of space turned you',
+    `You rolled once around the pillar and came back ${LAYER_NAMES[to]}, without touching the controls. The lap turned your needle ${Math.abs(degrees)}° ${degrees < 0 ? 'clockwise' : 'counter-clockwise'}.\n` +
+      'The four rooms round a pillar make a square, but in this curved space its corners are 72°, not 90°. So you turn 108° at each corner, 432° in all: a full turn plus 72°. You face the way you started, but the needle you carried, which you never turned, is now 72° off:',
+    'Back to the maze',
+    extra,
+    true,
+  );
 }
 
 // ---- Demo: level 3 plays itself --------------------------------------------------
 
 /** Each step is a route through rooms, or a single room centre to roll to. */
 type DemoStep = { route: number[] } | { center: number };
-const DEMO_LEVEL = 2;
+const DEMO_LEVEL = indexOfLevel('Curvature');
 const DEMO_STEPS: DemoStep[] = [
   { route: [0, 4] },
   { center: 4 }, // red shard
@@ -326,6 +364,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyH' && !hud.cardVisible()) showHelp();
   if (e.code === 'KeyR' && !hud.cardVisible()) startLevel(levelIndex);
   if (e.code === 'KeyT') applySettings({ ...settings, trail: !settings.trail });
+  if (e.code === 'KeyF') game.resetLook();
   if (e.code === 'KeyM') applySettings({ ...settings, sound: !settings.sound });
   if (e.code === 'KeyN') applySettings({ ...settings, music: !settings.music });
 });
@@ -364,13 +403,16 @@ function viewState(): ViewState {
     invulnerable: game.invulnerable,
     highlightPosts: highlight,
     trail: settings.trail ? game.trail : null,
+    look: game.look,
+    bridged: game.bridged,
+    riftFocus: game.riftFocus,
   };
 }
 
 function draw(): void {
   const viewInverse = lorentzInverse(game.viewFrame());
   view.render(viewInverse, viewState());
-  keyView.update(game.phaseDeg(), LAYER_RGB[game.layer], performance.now() / 1000);
+  keyView.update(game.look, LAYER_RGB[game.layer], performance.now() / 1000);
   keyView.render(view.renderer, window.innerWidth - insetSize - INSET_MARGIN, INSET_MARGIN, insetSize);
   const locate = (anchor: unknown) => {
     const [x, y] = toPoincare(apply(viewInverse, anchor as Vec3));
@@ -378,6 +420,15 @@ function draw(): void {
   };
   hud.updateLabels(locate);
   hud.updateTip(locate);
+  const focus = game.riftFocus;
+  if (focus && !paused) {
+    const w = game.level.world.walls[focus.wall];
+    const lined = Math.round(100 * Math.max(0, 1 - focus.smear / 0.6));
+    hud.setRift(`4D plank lined up ${lined}%`, game.level.tiling.tiles[w.tile].midpoints[w.edge]);
+  } else {
+    hud.setRift(null, null);
+  }
+  hud.updateRift(locate);
 }
 
 /** Turns game events into sound, labels and overlays. */
@@ -396,11 +447,22 @@ function handleEvents(): void {
   }
   for (const e of game.phaseEvents.splice(0)) {
     sound.phase(e.to, e.cause === 'curvature');
-    hud.flash(e.cause === 'curvature' ? `CURVATURE → ${LAYER_NAMES[e.to].toUpperCase()}` : `→ ${LAYER_NAMES[e.to].toUpperCase()}`, LAYER_CSS[e.to]);
+    const name = LAYER_NAMES[e.to].toUpperCase();
+    if (game.huntersSeeingYou(3).length > 0) {
+      // Phasing into a hunter's colour is the moment it can start hurting you: say so.
+      sound.alarm();
+      hud.flash(`${e.cause === 'curvature' ? 'CURVATURE → ' : '→ '}${name} · A ${name} HUNTER CAN SEE YOU`, LAYER_CSS[e.to]);
+    } else {
+      hud.flash(e.cause === 'curvature' ? `CURVATURE → ${name}` : `→ ${name}`, LAYER_CSS[e.to]);
+    }
     if (e.cause === 'curvature' && !ahaShown && levelIndex === DEMO_LEVEL) {
       ahaShown = true;
       showAha(lastLoopDegrees, e.to);
     }
+  }
+  for (const _ of game.bridgeEvents.splice(0)) {
+    sound.bridge();
+    hud.flash('THE PLANK LIES FLAT · BRIDGE BUILT', '#7fe7ff');
   }
   for (const _ of game.pickupEvents.splice(0)) {
     if (game.exitOpen()) {
@@ -419,7 +481,8 @@ function handleEvents(): void {
   if (game.hitEvents > 0) {
     game.hitEvents = 0;
     sound.hurt();
-    if (game.status !== 'lost') hud.flash(`HIT · ${game.lives} ${game.lives === 1 ? 'life' : 'lives'} left`, '#ff5a6e');
+    const colour = LAYER_NAMES[game.lastHitLayer].toLowerCase();
+    if (game.status !== 'lost') hud.flash(`HIT: you were both ${colour} · ${game.lives} ${game.lives === 1 ? 'life' : 'lives'} left`, '#ff5a6e');
   }
 }
 
@@ -503,7 +566,7 @@ function tick(now: number): void {
     fps,
     inputs: input.statuses(),
     layer: game.layer,
-    phaseDeg: game.phaseDeg(),
+    twistDeg: game.twistDeg,
     curvatureSteps: holonomySteps(game.holonomy()),
     twistAllowed: game.twistAllowed(),
     lives: game.lives,
@@ -512,15 +575,17 @@ function tick(now: number): void {
     hunters: game.hunters.map((h) => ({ layer: h.layer, shifter: h.shift !== null })),
     time: game.time,
     danger: game.danger(),
+    look: game.look,
+    seenBy: game.huntersSeeingYou().length,
   });
   requestAnimationFrame(tick);
 }
 
 /**
  * ?scene=… sets up a showcase state (used for the README screenshots):
- * title (level 1), doors (level 1 at a door), hunted (level 2 with a hunter
- * closing in), curvature (level 3 just after a pillar lap), shifter (level 5,
- * a shifter about to change colour), final (the last level).
+ * title (level 1), doors (level 1 at a door), hunted (Hunted with a hunter
+ * closing in), curvature (just after a pillar lap), rift (a 4D plank part-way
+ * lined up), shifter (a shifter about to change colour), final (the last level).
  */
 /** Puts the marble at a room's centre, carried along the direct route (scenes and dev hooks). */
 function teleport(room: number): void {
@@ -548,23 +613,32 @@ function setupScene(scene: string): void {
     hud.hideCard();
     paused = false;
   };
-  if (scene === 'title') begin(0);
+  if (scene === 'title') begin(indexOfLevel('Slip'));
   if (scene === 'doors') {
-    begin(0);
+    begin(indexOfLevel('Slip'));
     drive([0, 4, 14]);
   }
   if (scene === 'hunted') {
-    begin(1);
+    begin(indexOfLevel('Hunted'));
     for (let t = 0; t < 3.5; t += 1 / 60) game.update(1 / 60, new Autopilot(game));
   }
   if (scene === 'curvature') {
-    begin(2);
+    begin(indexOfLevel('Curvature'));
     drive([0, 4, 18, 5, 0]);
     handleEvents();
   }
+  if (scene === 'rift') {
+    // Beside the first rift on the Rift level, with the 4D view part-way to its plank.
+    begin(indexOfLevel('Rift'));
+    const id = game.level.world.walls.findIndex((w) => w.rift);
+    const w = game.level.world.walls[id];
+    teleport(w.tile);
+    game.look = [w.rift![0] - 22, w.rift![1] + 18];
+    for (let t = 0; t < 0.2; t += 1 / 60) game.update(1 / 60, new Autopilot(game));
+  }
   if (scene === 'shifter') {
     // Two rooms from the shifter, in the colour it is about to move into, just before it does.
-    begin(4);
+    begin(indexOfLevel('Shifter'));
     const shifter = game.hunters.find((h) => h.shift)!;
     const near = roomDistances(game.level.tiling, game.level.maze, shifter.spawn);
     teleport([...near.keys()].find((r) => near.get(r) === 2)!);

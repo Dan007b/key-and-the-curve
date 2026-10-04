@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/game/game';
-import { LEVELS, loadLevel } from '../src/game/level';
+import { LEVELS, levelNamed, loadLevel } from '../src/game/level';
 import { roomDistances } from '../src/game/maze';
 import type { InputSource } from '../src/input/InputSource';
 import { decompose, lorentzInverse, mul } from '../src/math/lorentz';
@@ -27,7 +27,7 @@ describe('levels', () => {
 describe('game loop', () => {
   it('keeps the view frame on the marble and follows it between rooms', () => {
     const game = new Game();
-    game.load(LEVELS[0]);
+    game.load(levelNamed('Slip'));
     const rooms = new Set<number>();
     // Level 1's start room opens downward (edge 3 of tile 0).
     for (let i = 0; i < 120; i++) {
@@ -45,7 +45,7 @@ describe('game loop', () => {
 
   it('measures zero holonomy along the maze tree', () => {
     const game = new Game();
-    game.load(LEVELS[0]);
+    game.load(levelNamed('Slip'));
     for (let i = 0; i < 300; i++) {
       game.update(1 / 60, fakeInput(Math.sin(i / 20), -1));
       // Level 1 has no loops, so the key can never be turned by curvature.

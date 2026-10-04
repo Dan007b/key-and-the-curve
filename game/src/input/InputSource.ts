@@ -20,6 +20,11 @@ export interface InputSource {
   phaseSteps(): number;
   /** Continuous phase rate through the fourth dimension, degrees per second (controller twist). */
   phaseRate(): number;
+  /**
+   * Turning your 4D view, −1..1 per plane: x turns it in XW, y in YW (full
+   * speed at ±1). Keyboard: Shift + arrows; controller: hold BOOT and tilt.
+   */
+  look?(): { x: number; y: number };
   status(): InputStatus;
   /** Advances any time-based smoothing. Called once per frame. */
   update?(dt: number): void;

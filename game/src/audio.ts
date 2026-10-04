@@ -76,6 +76,11 @@ export class Sound {
     this.tone(1320, 0.13, 0.09, 0.08, 'square');
   }
 
+  /** A rift bridged: the plank lies flat. A rising fifth, then the octave. */
+  bridge(): void {
+    [392, 587.33, 783.99].forEach((f, i) => this.tone(f, i * 0.09, 0.6, 0.08, 'triangle'));
+  }
+
   /** All lives gone. */
   caught(): void {
     [392, 311.13, 246.94, 196].forEach((f, i) => this.tone(f, i * 0.16, 0.5, 0.1, 'triangle'));

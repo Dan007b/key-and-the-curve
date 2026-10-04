@@ -93,9 +93,31 @@ export function playLevel(game: Game): boolean {
 }
 
 /**
+ * Turns the 4D view towards rift `wall`'s plank with look input (as the
+ * keyboard would, at most full speed), until the rift is bridged. Returns
+ * false if it doesn't bridge within `limit` seconds.
+ */
+export function bridgeRift(game: Game, wall: number, limit = 8): boolean {
+  const target = game.level.world.walls[wall].rift!;
+  const input: InputSource = {
+    tilt: () => ({ x: 0, y: 0 }),
+    phaseSteps: () => 0,
+    phaseRate: () => 0,
+    look: () => {
+      const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+      return { x: clamp((target[0] - game.look[0]) / 8), y: clamp((target[1] - game.look[1]) / 8) };
+    },
+    status: () => ({ label: 'bot', connected: true }),
+  };
+  for (let t = 0; t < limit && !game.bridged.has(wall); t += 1 / 60) game.update(1 / 60, input);
+  return game.bridged.has(wall);
+}
+
+/**
  * Plays a solver solution with the real physics: rolls room to room through
- * each shared edge's midpoint, and on a twist step phases, then re-centres in
- * the room (shards are picked up near the centre). True if the level is won.
+ * each shared edge's midpoint (bridging any rift on the way first), and on a
+ * twist step phases, then re-centres in the room (shards are picked up near
+ * the centre). True if the level is won.
  */
 export function followSolution(game: Game, steps: SolverStep[]): boolean {
   const { tiles } = game.level.tiling;
@@ -105,6 +127,8 @@ export function followSolution(game: Game, steps: SolverStep[]): boolean {
       if (game.layer !== step.twistTo) return false;
       if (drive(game, [tiles[game.room].center]) === Infinity) return false;
     } else {
+      const id = game.level.world.wallOn(game.room, tiles[game.room].neighbors.indexOf(step.room));
+      if (id !== -1 && game.level.world.walls[id].rift && !game.bridged.has(id) && !bridgeRift(game, id)) return false;
       if (drive(game, routeWaypoints(game, [game.room, step.room])) === Infinity) return false;
       if (game.status === 'won') return true;
       if (game.room !== step.room) return false;

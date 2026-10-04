@@ -7,6 +7,7 @@
  * that passage's holonomy jump: the carried frame's turn relative to the
  * destination room's reference frame, always a whole number of 72° steps
  * (transport.ts). Twist steps are free moves when the level allows twisting.
+ * Rifts count as open: you can always bridge one from the room beside it.
  *
  * The state space is small (rooms × 5 × 5 × 2^shards), so this is exact and
  * fast. It backs the level tests and the level generator.
@@ -22,6 +23,8 @@ export interface SolveOptions {
   passable?: Set<number>;
   /** Treat every door as a solid wall: used to check that the doors matter. */
   doorsSolid?: boolean;
+  /** Leave every rift unbridged: used to check that the rifts matter. (Otherwise a rift counts as open: you can always bridge one from the room beside it.) */
+  riftsClosed?: boolean;
   /** Allow twisting even if the level jams it (or forbid it with false). Default: the level's own rule. */
   twist?: boolean;
 }
@@ -71,7 +74,10 @@ export function solveLevelPath(level: LoadedLevel, opts: SolveOptions = {}): Sol
     for (const n of tiling.tiles[room].neighbors) {
       if (n === -1 || !maze.isRoom[n] || !allowed.has(passageKey(room, n))) continue;
       const id = world.wallOn(room, tiling.tiles[room].neighbors.indexOf(n));
-      if (id !== -1 && (opts.doorsSolid || world.walls[id].door !== layer)) continue;
+      if (id !== -1) {
+        const w = world.walls[id];
+        if (w.rift ? opts.riftsClosed : opts.doorsSolid || w.door !== layer) continue;
+      }
       push(n, mod(c + jump(room, n), LAYERS), t, { room: n });
     }
   }

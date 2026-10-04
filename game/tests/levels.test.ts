@@ -3,11 +3,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { Game, LIVES } from '../src/game/game';
-import { LEVELS, loadLevel } from '../src/game/level';
+import { LEVELS, levelNamed, loadLevel } from '../src/game/level';
 import type { LevelSpec } from '../src/game/level';
 import { passageKey } from '../src/game/maze';
 import { solveLevel, solveLevelPath } from '../src/game/solver';
-import { LAYERS, holonomySteps, layerOf } from '../src/game/phase';
+import { LAYERS, dialAngles, dialSectorAngle, holonomySteps, layerOf, mod } from '../src/game/phase';
 import { scheduledLayer } from '../src/game/hunter';
 import { makeRng } from '../src/game/random';
 import { drive, followSolution, idle, phaseTo, playLevel, routeWaypoints } from './bot';
@@ -15,6 +15,23 @@ import { drive, followSolution, idle, phaseTo, playLevel, routeWaypoints } from 
 const STEP = (72 * Math.PI) / 180;
 
 describe('phase layers', () => {
+  it('the dial needle always points at your layer (wheel = curvature, needle = twist)', () => {
+    for (let steps = -7; steps <= 7; steps++) {
+      for (let twist = -400; twist <= 400; twist += 7) {
+        if (Math.abs(mod(twist, 72) - 36) < 1) continue; // exactly between two layers: either is right
+        const { needle, wheel } = dialAngles(twist, steps);
+        // The sector whose centre (after the wheel turns) is nearest the needle.
+        let best = -1;
+        let bestGap = Infinity;
+        for (let i = 0; i < LAYERS; i++) {
+          const gap = Math.abs(mod(dialSectorAngle(i) + wheel - needle + 180, 360) - 180);
+          if (gap < bestGap) [best, bestGap] = [i, gap];
+        }
+        expect(best, `twist ${twist}, steps ${steps}`).toBe(layerOf(twist, steps));
+      }
+    }
+  });
+
   it('combine twist and curvature, wrapping around five layers', () => {
     expect(layerOf(0, 0)).toBe(0);
     expect(layerOf(72, 0)).toBe(1);
@@ -36,29 +53,30 @@ describe('levels', () => {
   });
 
   it('level 3 (no twisting) needs loops around the pillar', () => {
-    const spec = LEVELS[2];
+    const spec = levelNamed('Curvature');
     expect(spec.twist).toBe(false);
     expect(solvable(spec, loadLevel(spec).maze.tree)).toBe(false);
   });
 
-  it('every level that jams twisting needs loops, and every level needs its doors', () => {
+  it('every level that jams twisting needs loops, and every level needs its doors and its rifts', () => {
     for (const spec of LEVELS) {
       const level = loadLevel(spec);
       if (spec.twist === false) expect(solvable(spec, level.maze.tree), spec.name).toBe(false);
-      expect(solveLevel(level, { doorsSolid: true }), spec.name).toBe(-1);
+      if (spec.doors.length > 0) expect(solveLevel(level, { doorsSolid: true }), spec.name).toBe(-1);
+      if ((spec.rifts ?? []).length > 0) expect(solveLevel(level, { riftsClosed: true }), spec.name).toBe(-1);
     }
   });
 
-  it('every level has doors that need more than one colour', () => {
-    for (const spec of LEVELS) expect(new Set(spec.doors.map((d) => d.layer)).size, spec.name).toBeGreaterThanOrEqual(1);
+  it('every level has something in the way: a door or a rift', () => {
+    for (const spec of LEVELS) expect(spec.doors.length + (spec.rifts ?? []).length, spec.name).toBeGreaterThan(0);
   });
 });
 
 describe('rules', () => {
   it('a door blocks you unless you are in its colour', () => {
     const game = new Game();
-    game.load(LEVELS[0]);
-    const door = LEVELS[0].doors[0];
+    game.load(levelNamed('Slip'));
+    const door = levelNamed('Slip').doors[0];
     const beyond = game.level.tiling.tiles[door.tile].neighbors[door.edge];
     const route = (() => {
       const r = [] as number[];
@@ -96,7 +114,7 @@ describe('rules', () => {
 
   it('hunters only hit you in their own layer, then you get a breather, and three hits end the game', () => {
     const game = new Game();
-    game.load(LEVELS[1]);
+    game.load(levelNamed('Hunted'));
     const hunter = game.hunters[0];
     // Park the hunter right on top of the marble, in another layer: nothing happens.
     phaseTo(game, (hunter.layer + 1) % LAYERS);
@@ -120,7 +138,7 @@ describe('rules', () => {
 
   it('a hunter that sees you closes in through the maze', () => {
     const game = new Game();
-    game.load(LEVELS[1]);
+    game.load(levelNamed('Hunted'));
     const hunter = game.hunters[0];
     phaseTo(game, hunter.layer);
     const d0 = hunter.position[2];
@@ -147,7 +165,7 @@ describe('rules', () => {
 
   it('looping a pillar shifts you one layer (level 3)', () => {
     const game = new Game();
-    game.load(LEVELS[2]);
+    game.load(levelNamed('Curvature'));
     expect(game.layer).toBe(0);
     drive(game, routeWaypoints(game, [0, 4, 18, 5, 0])); // counter-clockwise lap
     expect(game.layer).toBe(4); // red → violet
@@ -213,14 +231,14 @@ describe('autopilot playthroughs (real physics)', () => {
 
   it('level 1: collect both shards through coloured doors, then the portal', () => {
     const game = new Game();
-    game.load(LEVELS[0]);
+    game.load(levelNamed('Slip'));
     expect(playLevel(game)).toBe(true);
     expect(game.status).toBe('won');
   });
 
   it('level 3: curvature only: red shard, a counter-clockwise lap to violet, two clockwise laps to gold, out', () => {
     const game = new Game();
-    game.load(LEVELS[2]);
+    game.load(levelNamed('Curvature'));
     const center = (r: number) => [game.level.tiling.tiles[r].center];
     drive(game, routeWaypoints(game, [0, 4]));
     drive(game, center(4)); // red shard

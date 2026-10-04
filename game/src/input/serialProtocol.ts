@@ -128,3 +128,38 @@ export function yawRate(gyro: V3, reference: V3, deadband = 0.35): number {
   const w = dot(gyro, r);
   return Math.abs(w) < deadband ? 0 : w;
 }
+
+/** Holding BOOT at least this long (ms) means "look into 4D" rather than a tap. */
+export const BOOT_HOLD_MS = 300;
+
+/**
+ * The BOOT button's two jobs. A tap (released within BOOT_HOLD_MS) steps up
+ * one layer; holding it turns tilt into turning your 4D view instead of
+ * rolling, until you let go. Fed the button state with each sample's time.
+ */
+export class BootButton {
+  private downAt: number | null = null;
+  private taps = 0;
+  private lastTime = 0;
+
+  update(pressed: boolean, timeMs: number): void {
+    if (pressed && this.downAt === null) this.downAt = timeMs;
+    if (!pressed && this.downAt !== null) {
+      if (timeMs - this.downAt < BOOT_HOLD_MS) this.taps++;
+      this.downAt = null;
+    }
+    this.lastTime = timeMs;
+  }
+
+  /** Whether BOOT has been held long enough to be looking (as of the last sample). */
+  holding(): boolean {
+    return this.downAt !== null && this.lastTime - this.downAt >= BOOT_HOLD_MS;
+  }
+
+  /** Taps since the last call. */
+  takeTaps(): number {
+    const n = this.taps;
+    this.taps = 0;
+    return n;
+  }
+}

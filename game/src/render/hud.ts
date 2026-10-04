@@ -5,14 +5,14 @@
  */
 
 import type { InputStatus } from '../input/InputSource';
-import { LAYERS, LAYER_CSS, LAYER_DEG, LAYER_NAMES } from '../game/phase';
+import { LAYERS, LAYER_CSS, LAYER_DEG, LAYER_NAMES, dialAngles, dialSectorAngle } from '../game/phase';
 
 export interface HudState {
   fps: number;
   inputs: InputStatus[];
   layer: number;
-  /** Continuous phase (twist + curvature), degrees: drives the ring's pointer. */
-  phaseDeg: number;
+  /** The phase you have dialled in yourself (continuous), degrees: turns the ring's needle. */
+  twistDeg: number;
   /** Whole layers of curvature picked up from loops (signed). */
   curvatureSteps: number;
   twistAllowed: boolean;
@@ -24,6 +24,10 @@ export interface HudState {
   time: number;
   /** 0..1 how close a hunter in your layer is. */
   danger: number;
+  /** Your 4D view, [xw, yw] degrees. */
+  look: readonly [number, number];
+  /** Hunters in your layer: the ones that can see and hit you. */
+  seenBy: number;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, parent: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -53,6 +57,10 @@ export class Hud {
   private readonly fps: HTMLDivElement;
   private readonly status: HTMLDivElement;
   private readonly layerPill: HTMLDivElement;
+  private readonly lookLabel: HTMLDivElement;
+  private readonly threat: HTMLDivElement;
+  private readonly riftMeter: HTMLDivElement;
+  private riftAnchor: unknown = null;
   private readonly curvature: HTMLDivElement;
   private readonly lives: HTMLDivElement;
   private readonly shards: HTMLDivElement;
@@ -60,7 +68,11 @@ export class Hud {
   private readonly vignette: HTMLDivElement;
   private readonly ring: SVGSVGElement;
   private readonly pointer: SVGGElement;
+  private readonly wheel: SVGGElement;
   private readonly ringMarks: SVGGElement;
+  /** The wheel's displayed turn (degrees, eased towards the curvature turn) and when it was last updated. */
+  private wheelShown = 0;
+  private wheelTime = 0;
   private readonly overlay: HTMLDivElement;
   private readonly toast: HTMLDivElement;
   private readonly tip: HTMLDivElement;
@@ -85,25 +97,34 @@ export class Hud {
     this.status = el('div', 'hud-status', right);
     this.layerPill = el('div', 'hud-layer', right);
     this.curvature = el('div', 'hud-curvature', right);
+    this.threat = el('div', 'hud-threat', right);
     this.buttons = el('div', 'hud-buttons', this.root);
 
-    // The 4D inset frame, with the phase ring drawn around it.
+    // The 4D inset frame, with the phase ring drawn around it. The ring is
+    // the honest picture of how your colour works: the colour wheel is painted
+    // on the world, and the pointer is a needle you carry. Twisting turns the
+    // needle. Looping a pillar turns the world relative to you by 72° (the
+    // holonomy), so the wheel turns under the needle. The colours run
+    // counter-clockwise so that both agree with layer = twist + curvature.
     const inset = el('div', 'hud-inset', this.root);
-    el('div', 'hud-inset-label', inset, 'Your 4D body');
+    el('div', 'hud-inset-label', inset, 'Your 4D view');
+    this.lookLabel = el('div', 'hud-look', inset);
     this.ring = document.createElementNS(SVG_NS, 'svg');
     this.ring.setAttribute('viewBox', '0 0 100 100');
     this.ring.classList.add('phase-ring');
     let svg = '';
     for (let i = 0; i < LAYERS; i++) {
-      const a = i * LAYER_DEG;
+      const a = dialSectorAngle(i);
       svg += `<path d="${sector(41, 47, a - LAYER_DEG / 2 + 1.5, a + LAYER_DEG / 2 - 1.5)}" fill="${LAYER_CSS[i]}" class="ring-sector" data-layer="${i}"/>`;
     }
-    this.ring.innerHTML = svg + '<g class="ring-marks"></g><g class="ring-pointer"><path d="M50,1.5 L46.2,8.5 L53.8,8.5 Z" fill="#fff"/></g>';
+    this.ring.innerHTML = `<g class="ring-wheel">${svg}<g class="ring-marks"></g></g><g class="ring-pointer"><path d="M50,1.5 L46.2,8.5 L53.8,8.5 Z" fill="#fff"/></g>`;
+    this.wheel = this.ring.querySelector('.ring-wheel') as SVGGElement;
     this.ringMarks = this.ring.querySelector('.ring-marks') as SVGGElement;
     this.pointer = this.ring.querySelector('.ring-pointer') as SVGGElement;
     inset.appendChild(this.ring);
 
     this.toast = el('div', 'hud-toast hidden', this.root);
+    this.riftMeter = el('div', 'rift-meter hidden', this.root);
     this.tipMarker = el('div', 'tip-marker hidden', this.root);
     this.tip = el('div', 'hud-tip hidden', this.root);
     el('div', 'hud-tip-label', this.tip, 'Tutorial');
@@ -145,6 +166,7 @@ export class Hud {
   }
 
   setLevel(index: number, name: string, hint: string): void {
+    this.wheelShown = 0;
     this.title.textContent = `Level ${index + 1} · ${name}`;
     this.hint.textContent = hint;
   }
@@ -178,12 +200,32 @@ export class Hud {
     this.timer.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
     this.vignette.style.opacity = String(Math.min(1, s.danger * 1.1));
+    // Who can hurt you right now: only hunters in your own colour.
+    const colour = LAYER_NAMES[s.layer].toLowerCase();
+    let threat = '';
+    if (s.hunters.length === 0) threat = '';
+    else if (s.seenBy > 0) threat = `⚠ ${s.seenBy} ${colour} hunter${s.seenBy > 1 ? 's' : ''} can see you`;
+    else threat = `Safe: no hunter is ${colour}`;
+    if (this.threat.textContent !== threat) this.threat.textContent = threat;
+    this.threat.classList.toggle('danger', s.seenBy > 0);
+    const deg = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v))}°`;
+    this.lookLabel.textContent = `XW ${deg(s.look[0])} · YW ${deg(s.look[1])}`;
 
-    // Phase ring: pointer at your phase; marks for hunters (dots) and shards (diamonds) in each layer.
-    this.pointer.setAttribute('transform', `rotate(${s.phaseDeg.toFixed(1)} 50 50)`);
+    // Phase ring: the needle turns with your twist (counter-clockwise for +);
+    // the wheel turns (clockwise on screen for +) with the curvature, easing
+    // over a quarter second so you see it move. Marks for hunters (dots) and
+    // shards (diamonds) sit on their layer's sector.
+    const dial = dialAngles(s.twistDeg, s.curvatureSteps);
+    this.pointer.setAttribute('transform', `rotate(${dial.needle.toFixed(1)} 50 50)`);
+    const now = performance.now() / 1000;
+    const dt = Math.min(0.1, Math.max(0, now - this.wheelTime));
+    this.wheelTime = now;
+    const target = dial.wheel;
+    this.wheelShown += (target - this.wheelShown) * (1 - Math.exp(-dt / 0.25));
+    this.wheel.setAttribute('transform', `rotate(${this.wheelShown.toFixed(1)} 50 50)`);
     let marks = '';
     for (let i = 0; i < LAYERS; i++) {
-      const a = ((i * LAYER_DEG - 90) * Math.PI) / 180;
+      const a = ((dialSectorAngle(i) - 90) * Math.PI) / 180;
       const hunters = s.hunters.filter((h) => h.layer === i);
       const shards = s.shards.filter((sh) => !sh.collected && sh.layer === i).length;
       const x = 50 + 35 * Math.cos(a);
@@ -283,6 +325,21 @@ export class Hud {
     const at = locate(this.tipAnchor);
     this.tipMarker.style.left = `${at.x}px`;
     this.tipMarker.style.top = `${at.y}px`;
+  }
+
+  /** Shows the "lined up" readout next to the rift you are working on (null hides it). */
+  setRift(text: string | null, anchor: unknown): void {
+    this.riftAnchor = text === null ? null : anchor;
+    this.riftMeter.classList.toggle('hidden', text === null);
+    if (text !== null && this.riftMeter.textContent !== text) this.riftMeter.textContent = text;
+  }
+
+  /** Keeps the rift readout on its rift; `locate` maps an anchor to screen px. */
+  updateRift(locate: (anchor: unknown) => { x: number; y: number }): void {
+    if (this.riftAnchor === null) return;
+    const at = locate(this.riftAnchor);
+    this.riftMeter.style.left = `${at.x}px`;
+    this.riftMeter.style.top = `${at.y}px`;
   }
 
   clearLabels(): void {

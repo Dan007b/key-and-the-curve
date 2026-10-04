@@ -7,18 +7,19 @@ import type { Tiling } from '../math/tiling';
 import { generateMaze, roomDistances } from './maze';
 import type { Maze } from './maze';
 import { buildWorld } from './world';
-import type { DoorEdge, World } from './world';
+import type { DoorEdge, RiftEdge, World } from './world';
 import { referenceFrames } from './transport';
 import type { Mat3 } from '../math/lorentz';
 
 import level1 from '../../levels/1-slip.json';
-import level2 from '../../levels/2-hunted.json';
-import level3 from '../../levels/3-curvature.json';
-import level4 from '../../levels/4-swarm.json';
-import level5 from '../../levels/5-shifter.json';
-import level6 from '../../levels/6-orbit.json';
-import level7 from '../../levels/7-flux.json';
-import level8 from '../../levels/8-escape.json';
+import level2 from '../../levels/2-rift.json';
+import level3 from '../../levels/3-hunted.json';
+import level4 from '../../levels/4-curvature.json';
+import level5 from '../../levels/5-swarm.json';
+import level6 from '../../levels/6-shifter.json';
+import level7 from '../../levels/7-orbit.json';
+import level8 from '../../levels/8-flux.json';
+import level9 from '../../levels/9-escape.json';
 
 export interface ShardSpec {
   tile: number;
@@ -53,6 +54,8 @@ export interface LevelSpec {
   /** Whether you may twist through the fourth dimension (false: only curvature moves you). */
   twist?: boolean;
   doors: DoorEdge[];
+  /** Rifts: passages you bridge by lining up a 4D plank (turn your 4D view to its angles). */
+  rifts?: RiftEdge[];
   shards: ShardSpec[];
   hunters: HunterSpec[];
   /** Hunter chase speed at the start, units/s (it rises over time). */
@@ -65,7 +68,19 @@ export interface LevelSpec {
   hint: string;
 }
 
-export const LEVELS: LevelSpec[] = [level1, level2, level3, level4, level5, level6, level7, level8] as LevelSpec[];
+export const LEVELS: LevelSpec[] = [level1, level2, level3, level4, level5, level6, level7, level8, level9] as LevelSpec[];
+
+/** Index of the level called `name` in LEVELS (throws if there is none). */
+export function levelIndex(name: string): number {
+  const i = LEVELS.findIndex((l) => l.name === name);
+  if (i === -1) throw new Error(`no level named ${name}`);
+  return i;
+}
+
+/** The level called `name`. */
+export function levelNamed(name: string): LevelSpec {
+  return LEVELS[levelIndex(name)];
+}
 
 /** Generation radius for every level's tiling. Fixed so tile indices never change. */
 export const WORLD_RADIUS = 7.5;
@@ -108,7 +123,7 @@ export function loadLevel(spec: LevelSpec): LoadedLevel {
   if (!roomDistances(tiling, maze, spec.start).has(spec.exit)) {
     throw new Error(`level ${spec.name}: exit unreachable`);
   }
-  const world = buildWorld(tiling, maze, spec.doors);
+  const world = buildWorld(tiling, maze, spec.doors, spec.rifts ?? []);
   const references = referenceFrames(tiling, maze.tree, spec.start);
   return { spec, tiling, maze, world, references };
 }

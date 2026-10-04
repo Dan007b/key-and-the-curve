@@ -12,15 +12,17 @@ import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import { apply, identity, mul, rotation, translationTo } from '../math/lorentz';
+import { apply, expOrigin, identity, mul, rotation, translationTo } from '../math/lorentz';
 import type { Mat3, ReadonlyMat3, Vec3 } from '../math/lorentz';
 import { toPoincare } from '../math/poincare';
+import { segmentFrame } from '../math/geodesic';
+import { TESSERACT_EDGES, TESSERACT_VERTICES, plankOrientation, shadowAxes } from '../math/four';
 import type { Tiling } from '../math/tiling';
 import { HyperMesh, dashedRing, geodesicBand, hyperDisk, hyperRing, polygonFan, softGeodesicBand } from './hyperMesh';
 import type { World } from '../game/world';
 import { POST_RADIUS, WALL_HALF_WIDTH } from '../game/world';
 import type { LevelSpec } from '../game/level';
-import { TRAIL_LENGTH } from '../game/game';
+import { BRIDGE_SMEAR, PLANK_EXTENTS, TRAIL_LENGTH } from '../game/game';
 import { HUNTER_RADIUS } from '../game/hunter';
 import { LAYER_RGB } from '../game/phase';
 
@@ -87,7 +89,22 @@ export interface ViewState {
   highlightPosts: Set<number>;
   /** Recent marble positions (world), oldest first, or null to hide the trail. */
   trail: readonly Vec3[] | null;
+  /** Your 4D view, [xw, yw] degrees. */
+  look: readonly [number, number];
+  /** Rifts already bridged (wall ids). */
+  bridged: ReadonlySet<number>;
+  /** The rift being lined up and how flat its plank is, or null. */
+  riftFocus: { wall: number; smear: number } | null;
 }
+
+/** Rift glow and plank colours: cyan for the plank's x, y edges, gold for its w edges (the fourth dimension). */
+const RIFT_RGB: RGB = [0.45, 0.95, 1.0];
+const PLANK_W_RGB: RGB = [1.0, 0.8, 0.3];
+const BRIDGE_RGB: RGB = [0.75, 0.97, 1.0];
+/** Most hunters any level has, for the sight-line buffer. */
+const SIGHT_CAPACITY = 16;
+/** Plank edges drawn per rift: the tesseract's 32 minus the 8 along z, which never show in the floor's shadow. */
+const PLANK_EDGES = TESSERACT_EDGES.filter((e) => e.axis !== 2);
 
 export class DiskView {
   readonly renderer: THREE.WebGLRenderer;
@@ -117,6 +134,17 @@ export class DiskView {
   private hunterCores!: HyperMesh;
   private hunterShift!: HyperMesh;
   private portal!: HyperMesh;
+  private riftGlow!: HyperMesh;
+  private riftCore!: HyperMesh;
+  private bridges!: HyperMesh;
+  /** Canonical edge's midpoint frame (x along the edge, y across): planks are drawn in it. */
+  private edgeFrame: Mat3 = identity();
+  private readonly planks: LineSegments2;
+  /** A line from you to every hunter that shares your colour: the ones that can see and hit you. */
+  private readonly sight: LineSegments2;
+  private readonly sightGeometry: LineSegmentsGeometry;
+  private readonly plankGeometry: LineSegmentsGeometry;
+  private plankCapacity = 0;
   private readonly tileMatrices: Mat3[] = [];
   private readonly tileVisible: boolean[] = [];
   private readonly tmp: Mat3 = identity();
@@ -169,6 +197,27 @@ export class DiskView {
     this.trail.frustumCulled = false;
     this.trail.renderOrder = 40;
     this.scene.add(this.trail);
+
+    // 4D planks over the rifts: the shadow of a tesseract-shaped plank, re-projected every frame.
+    this.plankGeometry = new LineSegmentsGeometry();
+    this.planks = new LineSegments2(
+      this.plankGeometry,
+      new LineMaterial({ linewidth: 2, vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }),
+    );
+    this.planks.frustumCulled = false;
+    this.planks.renderOrder = 45;
+    this.scene.add(this.planks);
+
+    this.sightGeometry = new LineSegmentsGeometry();
+    this.sightGeometry.setPositions(new Float32Array(SIGHT_CAPACITY * 6));
+    this.sightGeometry.setColors(new Float32Array(SIGHT_CAPACITY * 6));
+    this.sight = new LineSegments2(
+      this.sightGeometry,
+      new LineMaterial({ linewidth: 2, vertexColors: true, dashed: false, transparent: true, opacity: 0.9, depthTest: false }),
+    );
+    this.sight.frustumCulled = false;
+    this.sight.renderOrder = 41;
+    this.scene.add(this.sight);
   }
 
   /** Installs a loaded level's geometry. */
@@ -200,7 +249,18 @@ export class DiskView {
     this.hunterCores = new HyperMesh(hyperDisk(HUNTER_RADIUS * 0.45, 16), Math.max(1, spec.hunters.length), 'alpha', 11);
     // Shifters wear a spinning dashed ring in the colour they shift into next.
     this.hunterShift = new HyperMesh(dashedRing(HUNTER_RADIUS * 1.7, HUNTER_RADIUS * 2.05, 5, 0.55, 4), Math.max(1, spec.hunters.length), 'alpha', 12);
-    this.meshes = [this.fills, this.grid, this.wallGlow, this.walls, this.doorGlow, this.doors, this.posts, this.portal, this.shards, this.hunterHalos, this.hunterBodies, this.hunterCores, this.hunterShift];
+    // Rifts: a glowing crack, the faint outline of the bridge-to-be, and solid bridges once built.
+    this.edgeFrame = segmentFrame(v0, v1);
+    const [hx, hy] = PLANK_EXTENTS;
+    const plankEnds = [apply(this.edgeFrame, expOrigin(0, -hy)), apply(this.edgeFrame, expOrigin(0, hy))];
+    this.riftGlow = new HyperMesh(softGeodesicBand(v0, v1, 0.18, 16, 0.02), walls, 'additive', 13);
+    this.riftCore = new HyperMesh(geodesicBand(v0, v1, WALL_HALF_WIDTH * 0.6, 12, 0), walls, 'alpha', 14);
+    this.bridges = new HyperMesh(geodesicBand(plankEnds[0], plankEnds[1], hx, 8, 0), walls, 'alpha', 15);
+    const rifts = world.walls.filter((w) => w.rift).length;
+    this.plankCapacity = Math.max(1, rifts) * PLANK_EDGES.length;
+    this.plankGeometry.setPositions(new Float32Array(this.plankCapacity * 6));
+    this.plankGeometry.setColors(new Float32Array(this.plankCapacity * 6));
+    this.meshes = [this.fills, this.grid, this.wallGlow, this.walls, this.doorGlow, this.doors, this.posts, this.portal, this.shards, this.hunterHalos, this.hunterBodies, this.hunterCores, this.hunterShift, this.riftGlow, this.riftCore, this.bridges];
     for (const m of this.meshes) this.scene.add(m.mesh);
 
     this.tileMatrices.length = 0;
@@ -235,6 +295,8 @@ export class DiskView {
     this.centerPx = { x: width / 2, y: height / 2 };
     this.camera.updateProjectionMatrix();
     (this.trail.material as LineMaterial).resolution.set(width, height);
+    (this.planks.material as LineMaterial).resolution.set(width, height);
+    (this.sight.material as LineMaterial).resolution.set(width, height);
   }
 
   /** Writes the trail as disk-space segments from point i to i+1, brightest at the newest end. */
@@ -266,6 +328,81 @@ export class DiskView {
     this.trailGeometry.instanceCount = n - 1;
     pos.needsUpdate = true;
     col.needsUpdate = true;
+  }
+
+  /**
+   * The 4D plank over every visible unbridged rift, as seen from your 4D view:
+   * the tesseract-shaped plank turned by M = L(view)·L(target)⁻¹ and projected
+   * onto the floor (shadowAxes). Its corners are drawn in the rift's own frame
+   * (x along the crack, y across), so it lies across the crack as a bridge
+   * when flat. W edges are gold: they shrink to nothing as it lines up.
+   * Edges are drawn straight in the disk; they are under 0.7 units long, so
+   * the bend of a true geodesic would be a fraction of a pixel near the centre.
+   */
+  private updatePlanks(state: ViewState): void {
+    const world = this.world!;
+    const { tiling } = world;
+    const p = (this.plankGeometry.attributes.instanceStart as THREE.InterleavedBufferAttribute).data;
+    const c = (this.plankGeometry.attributes.instanceColorStart as THREE.InterleavedBufferAttribute).data;
+    const pos = p.array as Float32Array;
+    const col = c.array as Float32Array;
+    let n = 0;
+    world.walls.forEach((wall, id) => {
+      if (!wall.rift || state.bridged.has(id) || !this.tileVisible[wall.tile]) return;
+      const frame = mul(mul(this.tileMatrices[wall.tile], tiling.edgeRotations[wall.edge]), this.edgeFrame);
+      if (frame[8] > CULL_COSH) return;
+      const g = shadowAxes(plankOrientation(state.look, wall.rift), PLANK_EXTENTS);
+      const corner = TESSERACT_VERTICES.map((v) => {
+        const sx = v[0] * g[0][0] + v[1] * g[1][0] + v[2] * g[2][0] + v[3] * g[3][0];
+        const sy = v[0] * g[0][1] + v[1] * g[1][1] + v[2] * g[2][1] + v[3] * g[3][1];
+        return toPoincare(apply(frame, expOrigin(sx, sy)));
+      });
+      const focus = state.riftFocus?.wall === id;
+      // Brighter when it is the one you are lining up, and brightest when nearly flat.
+      const k = focus ? 0.75 + 0.25 * Math.max(0, 1 - state.riftFocus!.smear / (4 * BRIDGE_SMEAR)) : 0.45;
+      for (const e of PLANK_EDGES) {
+        if (n >= this.plankCapacity) return;
+        const a = corner[e.a];
+        const b = corner[e.b];
+        pos.set([a[0], a[1], 0, b[0], b[1], 0], n * 6);
+        const rgb = e.axis === 3 ? PLANK_W_RGB : RIFT_RGB;
+        col.set([rgb[0] * k, rgb[1] * k, rgb[2] * k, rgb[0] * k, rgb[1] * k, rgb[2] * k], n * 6);
+        n++;
+      }
+    });
+    this.planks.visible = n > 0;
+    this.plankGeometry.instanceCount = n;
+    p.needsUpdate = true;
+    c.needsUpdate = true;
+  }
+
+  /**
+   * Sight lines: from the marble (the disk centre) to each hunter in your
+   * layer, fading from the hunter's end to yours, pulsing while it chases.
+   * Drawn straight in the disk: a geodesic through the centre is a diameter,
+   * so this is exact.
+   */
+  private updateSight(state: ViewState, viewInverse: ReadonlyMat3): void {
+    const p = (this.sightGeometry.attributes.instanceStart as THREE.InterleavedBufferAttribute).data;
+    const c = (this.sightGeometry.attributes.instanceColorStart as THREE.InterleavedBufferAttribute).data;
+    const pos = p.array as Float32Array;
+    const col = c.array as Float32Array;
+    let n = 0;
+    const pulse = 0.6 + 0.4 * Math.sin(state.time * 8);
+    for (const h of state.hunters) {
+      if (h.layer !== state.layer || n >= SIGHT_CAPACITY) continue;
+      const [x, y] = toPoincare(apply(viewInverse, h.position));
+      if (Math.hypot(x, y) > 0.97) continue;
+      const [r, g, b] = LAYER_RGB[h.layer];
+      const k = h.chasing ? pulse : 0.35;
+      pos.set([0, 0, 0, x, y, 0], n * 6);
+      col.set([r * 0.15, g * 0.15, b * 0.15, r * k, g * k, b * k], n * 6);
+      n++;
+    }
+    this.sight.visible = n > 0;
+    this.sightGeometry.instanceCount = n;
+    p.needsUpdate = true;
+    c.needsUpdate = true;
   }
 
   /** Matrix placing a shape centred on O at world point p, as seen from the view. */
@@ -310,17 +447,33 @@ export class DiskView {
     this.wallGlow.begin();
     this.doors.begin();
     this.doorGlow.begin();
-    for (const wall of world.walls) {
-      if (!this.tileVisible[wall.tile]) continue;
+    this.riftGlow.begin();
+    this.riftCore.begin();
+    this.bridges.begin();
+    world.walls.forEach((wall, id) => {
+      if (!this.tileVisible[wall.tile]) return;
       const m = mul(this.tileMatrices[wall.tile], tiling.edgeRotations[wall.edge], this.tmp);
       const shade = distanceShade(Math.acosh(Math.max(1, this.tileMatrices[wall.tile][8])));
+      if (wall.rift) {
+        const [r, g, b] = state.bridged.has(id) ? BRIDGE_RGB : RIFT_RGB;
+        if (state.bridged.has(id)) {
+          this.bridges.push(m, r, g, b, 0.9);
+        } else {
+          // The crack flickers; the bridge it could become is a faint outline.
+          const flicker = 0.6 + 0.4 * Math.sin(t * 9 + id * 1.7) * Math.sin(t * 5.3 + id);
+          this.riftGlow.push(m, r * shade * flicker, g * shade * flicker, b * shade * flicker, 1);
+          this.riftCore.push(m, r, g, b, 0.5 + 0.4 * flicker);
+          this.bridges.push(m, r, g, b, state.riftFocus?.wall === id ? 0.16 : 0.07);
+        }
+        return;
+      }
       if (wall.door === -1) {
         const [r, g, b] = COLORS.wall;
         const k = 0.35 + 0.65 * shade;
         this.walls.push(m, r * k, g * k, b * k);
         const [gr, gg, gb] = COLORS.wallGlow;
         this.wallGlow.push(m, gr * shade, gg * shade, gb * shade, 1);
-        continue;
+        return;
       }
       const [r, g, b] = LAYER_RGB[wall.door];
       if (wall.door === state.layer) {
@@ -330,11 +483,15 @@ export class DiskView {
         const halo = 0.55 * shade;
         this.doorGlow.push(m, r * halo, g * halo, b * halo, 1);
       }
-    }
+    });
     this.walls.end();
     this.wallGlow.end();
     this.doors.end();
     this.doorGlow.end();
+    this.riftGlow.end();
+    this.riftCore.end();
+    this.bridges.end();
+    this.updatePlanks(state);
 
     this.posts.begin();
     world.posts.forEach((post, id) => {
@@ -398,6 +555,7 @@ export class DiskView {
     this.hunterHalos.end();
     this.hunterCores.end();
     this.hunterShift.end();
+    this.updateSight(state, viewInverse);
 
     this.updateTrail(state.trail, viewInverse, layerRgb);
     const body = mix([0.96, 0.97, 1.0], layerRgb, 0.35);

@@ -1,0 +1,41 @@
+{
+  "name": "Rift",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 2,
+  "seed": 12,
+  "extraOpenings": 1,
+  "start": 0,
+  "exit": 7,
+  "doors": [],
+  "shards": [
+    {
+      "tile": 8,
+      "layer": 4
+    },
+    {
+      "tile": 13,
+      "layer": 0
+    }
+  ],
+  "hunters": [],
+  "par": 100,
+  "intro": "Your marble carries a tesseract, a 4D cube: it is the picture in the corner, and it is how you look at the world. The glowing cracks are rifts. Over each one floats a plank that is four-dimensional, so all you see is its smeared shadow. Hold Shift and use the arrow keys (or hold BOOT and tilt the controller) to turn your view into the fourth dimension. The tesseract turns, the shadow shifts, and when the plank lies flat over the crack it becomes a bridge.",
+  "hint": "Rift: hold Shift + arrows (or BOOT + tilt) to turn your 4D view until the plank lies flat. F straightens your view.",
+  "rifts": [
+    {
+      "tile": 4,
+      "edge": 2,
+      "xw": -45,
+      "yw": 50
+    },
+    {
+      "tile": 5,
+      "edge": 3,
+      "xw": 55,
+      "yw": 15
+    }
+  ]
+}

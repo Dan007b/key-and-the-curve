@@ -47,13 +47,19 @@ describe('level generator', () => {
     }
   });
 
-  it('only emits fair levels: solvable, doors needed, loops needed when twisting is jammed', () => {
+  it('only emits fair levels: solvable, doors and rifts needed, loops needed when twisting is jammed', () => {
     for (const { recipe } of RECIPES) {
       const { spec, moves } = generateLevel(recipe);
       const level = loadLevel(spec);
       expect(solveLevel(level), recipe.name).toBe(moves);
       expect(moves).toBeGreaterThan(0);
-      expect(solveLevel(level, { doorsSolid: true }), recipe.name).toBe(-1);
+      expect(spec.doors).toHaveLength(recipe.doors);
+      expect(spec.rifts ?? []).toHaveLength(recipe.rifts ?? 0);
+      if (recipe.doors > 0) expect(solveLevel(level, { doorsSolid: true }), recipe.name).toBe(-1);
+      if (recipe.rifts) expect(solveLevel(level, { riftsClosed: true }), recipe.name).toBe(-1);
+      for (const r of spec.rifts ?? []) {
+        for (const a of [r.xw, r.yw]) expect(Math.abs(a) >= 15 && Math.abs(a) <= 60, recipe.name).toBe(true);
+      }
       if (recipe.twist === false) expect(solveLevel(level, { passable: level.maze.tree }), recipe.name).toBe(-1);
     }
   });

@@ -26,7 +26,7 @@ Everything connects to **one header**: the side with the 5V (or VIN) and GND pin
 
 ### The button
 
-There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the only button. In Phase Escape each press **moves you up one layer** of the fourth dimension. The firmware only reports whether BOOT is held (debounced, 20 ms); the game counts presses. Turning the whole controller like a dial (about the vertical you captured with Set level) also slides you through the layers.
+There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the only button, and it does two jobs. A **tap** (released within 0.3 s) **moves you up one layer** of the fourth dimension. **Holding** it turns tilt into **turning your 4D view** (the tesseract) instead of rolling: left/right turns it in the XW plane, forward/back in YW, until you let go. That is how you line up the planks over rifts. The firmware only reports whether BOOT is held (debounced, 20 ms); the game times the presses (`BootButton` in `game/src/input/serialProtocol.ts`). Turning the whole controller like a dial (about the vertical you captured with Set level) also slides you through the layers.
 
 Don't hold BOOT while plugging the board in or pressing EN: GPIO0 is sampled at reset, and holding it low starts the bootloader instead of the firmware. Pressing it at any other time is safe.
 
@@ -95,7 +95,7 @@ $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn
 | `gx..gz` | Gravity vector in the sensor frame, m/s² (0.01 resolution). |
 | `wx..wz` | Gyro angular velocity, **rad/s**. |
 | `cal` | Calibration status `sys*1000 + gyr*100 + acc*10 + mag`, each 0–3. It is a plain integer, so leading zeros are dropped: `300` means sys 0, gyr 3, acc 0, mag 0. `3333` is fully calibrated. |
-| `btn` | 1 while BOOT is held, else 0 (bit1 is reserved and always 0). The game moves you up one layer on each press. |
+| `btn` | 1 while BOOT is held, else 0 (bit1 is reserved and always 0). The game moves you up one layer on each tap, and uses a hold to turn your 4D view. |
 
 **Gyro units.** The BNO055 powers up reporting deg/s, and the Adafruit library never changes that register; its `getVector(VECTOR_GYROSCOPE)` divides the raw value by 16 LSB per deg/s. The firmware multiplies by π/180, so the stream is in rad/s.
 

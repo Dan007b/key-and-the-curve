@@ -23,6 +23,11 @@ export interface Wall {
   b: Vec3;
   /** The layer this door is open in, or −1 for a solid wall (closed in every layer). */
   door: number;
+  /**
+   * For a rift: the 4D view [xw, yw] (degrees) from which its plank lies flat
+   * and bridges it; null for walls and doors. A rift blocks until bridged.
+   */
+  rift: [number, number] | null;
 }
 
 export interface Post {
@@ -52,14 +57,22 @@ export interface DoorEdge {
   layer: number;
 }
 
+export interface RiftEdge {
+  tile: number;
+  edge: number;
+  /** The 4D view, degrees in the XW and YW planes (each within ±60), from which its plank lies flat. */
+  xw: number;
+  yw: number;
+}
+
 /**
- * Builds walls on every room edge that is not an open passage, doors on the
- * listed edges (which must be open passages), and a post on every vertex of
+ * Builds walls on every room edge that is not an open passage, doors and
+ * rifts on the listed edges (which must be open passages), and a post on every vertex of
  * every room. Posts matter beyond looks: they stop the marble rolling over a
  * vertex, so which side of each pillar a path went is always well defined,
  * which is what the key's holonomy counts (see transport.ts).
  */
-export function buildWorld(tiling: Tiling, maze: Maze, doors: readonly DoorEdge[]): World {
+export function buildWorld(tiling: Tiling, maze: Maze, doors: readonly DoorEdge[], rifts: readonly RiftEdge[] = []): World {
   const { tiles } = tiling;
   const p = tiling.metrics.p;
   const walls: Wall[] = [];
@@ -70,19 +83,26 @@ export function buildWorld(tiling: Tiling, maze: Maze, doors: readonly DoorEdge[
     const d = doors.find((g) => (g.tile === tile && g.edge === edge) || (g.tile === j && tiles[j]?.neighbors[g.edge] === tile));
     return d ? d.layer : -1;
   };
+  const riftAt = (tile: number, edge: number): [number, number] | null => {
+    const j = tiles[tile].neighbors[edge];
+    const r = rifts.find((g) => (g.tile === tile && g.edge === edge) || (g.tile === j && tiles[j]?.neighbors[g.edge] === tile));
+    return r ? [r.xw, r.yw] : null;
+  };
 
   for (const i of maze.rooms) {
     tiles[i].neighbors.forEach((j, k) => {
       const jIsRoom = j !== -1 && maze.isRoom[j] === 1;
       if (jIsRoom && j < i) return; // the lower index owns shared walls
       const door = jIsRoom ? doorAt(i, k) : -1;
+      const rift = jIsRoom ? riftAt(i, k) : null;
       const open = jIsRoom && maze.open.has(passageKey(i, j));
-      if (open && door === -1) return;
-      if (door !== -1 && !open) {
-        throw new Error(`level: door on tiles ${i}/${j} is not an open passage`);
+      if (open && door === -1 && rift === null) return;
+      if ((door !== -1 || rift !== null) && !open) {
+        throw new Error(`level: door or rift on tiles ${i}/${j} is not an open passage`);
       }
+      if (door !== -1 && rift !== null) throw new Error(`level: tiles ${i}/${j} have both a door and a rift`);
       const id = walls.length;
-      walls.push({ tile: i, edge: k, a: tiles[i].vertices[k], b: tiles[i].vertices[(k + 1) % p], door });
+      walls.push({ tile: i, edge: k, a: tiles[i].vertices[k], b: tiles[i].vertices[(k + 1) % p], door, rift });
       wallIds.set(i * p + k, id);
       if (j !== -1) wallIds.set(j * p + tiles[i].neighborEdges[k], id);
     });

@@ -60,10 +60,20 @@ Danny's feedback: the tesseract-key matching is vague and too hard, there is no 
 - [x] **Music** (`src/music.ts`): live Web Audio, one chord per layer (A minor, F, C, G, E minor), arpeggio + bass, hi-hats/kick/faster arpeggio as a hunter in your layer closes in, quieter while a card is up. N toggles; volume in Settings.
 - [x] 124 tests; README, MATH.md §8, DEMO.md, CLAUDE.md §13, screenshots (new `?scene=shifter`), desktop app rebuilt (`desktop/out/Phase Escape-win32-x64`).
 
+## Pass 3: making it understandable, and giving the tesseract a job
+
+Danny's questions: how does a lap round a pole change the dimension? Do different straight paths lead to the same point? When does a hunter hurt me? And the tesseract should *do* something, Witness/Superliminal style.
+
+- [x] **The tesseract is your 4D view.** Shift + arrows (or hold BOOT ≥ 0.3 s and tilt) turn it in XW / YW; F straightens it. BOOT tap = +1 layer as before.
+- [x] **Rifts and 4D planks:** a rift blocks a passage; the plank over it is a 4D box seen through your view, so its floor shadow is smeared by its gold w edges. Line up the view until it lies flat and it becomes a bridge (math in MATH.md §9, unique solution tested over every degree). New level 2 **Rift**, and Flux has one. Levels renumbered to 9 (`1-slip … 9-escape.json`).
+- [x] **Hunters:** a line from you to every hunter of your colour, a "⚠ 1 red hunter can see you" / "Safe" readout, an alarm and message when you phase into a hunter's colour nearby, and hit messages that say "you were both red". Tutorial tips on Hunted.
+- [x] **Holonomy explained:** the phase ring is now a colour wheel painted on the world (turned by curvature) with a carried needle (turned by twist); the holonomy card and help show flat vs curved squares (4 × 108° = 432° = 360° + 72°). Help answers the straight-path question: in the hyperbolic plane there is one straight path between two points; what changes is the orientation you arrive with (72° per pillar between two routes).
+- [x] 140 tests; README, MATH.md §8–9, HARDWARE.md (BOOT tap/hold), DEMO.md, screenshots (new `?scene=rift`), desktop rebuilt.
+
 ## Not yet verified / next ideas
 
 - Old build folder `desktop/out/The Key and the Curve-win32-x64` (368 MB) is still there: that app was running during this pass. Close it, then delete the folder.
-- Controller phasing (yaw dial + BOOT steps) still not tried on the real board: check direction and the "turn needed per layer" setting; tilt direction may need invert/swap in Settings.
+- Controller phasing (yaw dial + BOOT steps) still not tried on the real board: check direction and the "turn needed per layer" setting; tilt direction may need invert/swap in Settings. New: BOOT is now tap (< 0.3 s, +1 layer, counted on release) vs hold (tilt turns the 4D view): check it feels right.
 - Playtest levels 5–7 by hand for difficulty (par is 4.5 s per solver move); tweak a recipe (hunterSpeed, shiftEvery, seed) and rerun `npm run levels` if one feels off.
 - Music is synthesized on the fly and needs a key press or click before browsers allow audio; check it on the demo laptop's speakers and set the volume in Settings.
 - Ideas: a compass towards the nearest shard on the disk rim, an endless mode that generates levels on the fly with the generator, controller vibration for shifter warnings if a motor is ever fitted.

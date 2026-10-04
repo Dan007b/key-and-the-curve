@@ -246,3 +246,53 @@ export function project4to3(v: Readonly<Vec4>, d = 3, s = 1.6): [number, number,
 export function approach(k: readonly number[], target: readonly number[], alpha: number): Mat4 {
   return reorthonormalize4(k.map((x, i) => x + alpha * (target[i] - x)));
 }
+
+// ---- Looking into the fourth dimension (rifts and planks) ---------------------
+
+/**
+ * Your 4D view: turned by `xwDeg` in the XW plane, then `ywDeg` in the YW
+ * plane, L = R_yw(β)·R_xw(α). XW turns the floor's left-right direction
+ * towards w, YW its up-down direction. The two angles are absolute (not
+ * accumulated), so the view is a point in a square of angles, ±90° each.
+ */
+export function lookRotation(xwDeg: number, ywDeg: number): Mat4 {
+  const d = Math.PI / 180;
+  return mul4(planeRotation('yw', ywDeg * d), planeRotation('xw', xwDeg * d));
+}
+
+/**
+ * How a plank that lies flat when viewed from `target` looks from `view`:
+ * M = L(view)·L(target)⁻¹, its orientation relative to you. M = I at the
+ * target. (Both angle pairs are [xw, yw] in degrees.)
+ */
+export function plankOrientation(view: readonly [number, number], target: readonly [number, number]): Mat4 {
+  return mul4(lookRotation(view[0], view[1]), transpose4(lookRotation(target[0], target[1])));
+}
+
+/**
+ * The plank's shadow on the floor: each of its four axes (half-extents
+ * `ext`, along x, y, z, w) projected orthographically onto the xy plane.
+ * The shadow is the zonogon these four vectors span; the corners of the
+ * plank (±ext) land at sums of ± these vectors.
+ */
+export function shadowAxes(m: readonly number[], ext: readonly number[]): [number, number][] {
+  return [0, 1, 2, 3].map((j) => [ext[j] * m[j], ext[j] * m[4 + j]] as [number, number]);
+}
+
+/**
+ * Smear: how far the shadow is from the flat rectangle ext.x × ext.y it
+ * makes from the target view, as a fraction of the plank's size. 0 when it
+ * lies flat. The x and y axes may also be reversed (a rectangle looks the
+ * same flipped); the z and w axes must vanish from the shadow.
+ *
+ * Over the ±90° square of views it has a single zero, at the target (checked
+ * in four.test.ts); near it, 1° off in XW gives about 0.011, 1° in YW 0.006.
+ */
+export function plankSmear(m: readonly number[], ext: readonly number[]): number {
+  const g = shadowAxes(m, ext);
+  const ex = Math.min(Math.hypot(g[0][0] - ext[0], g[0][1]), Math.hypot(g[0][0] + ext[0], g[0][1]));
+  const ey = Math.min(Math.hypot(g[1][0], g[1][1] - ext[1]), Math.hypot(g[1][0], g[1][1] + ext[1]));
+  const ez = Math.hypot(g[2][0], g[2][1]);
+  const ew = Math.hypot(g[3][0], g[3][1]);
+  return (ex + ey + ez + ew) / (ext[0] + ext[1] + ext[2] + ext[3]);
+}

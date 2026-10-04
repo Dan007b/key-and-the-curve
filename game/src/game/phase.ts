@@ -44,3 +44,19 @@ export function layerOf(twistDeg: number, holonomySteps: number): number {
 export function holonomySteps(holonomy: number): number {
   return Math.round((holonomy * 180) / Math.PI / LAYER_DEG);
 }
+
+/**
+ * The phase dial (HUD ring), as clockwise screen angles in degrees from the
+ * top. The colour wheel is painted on the world, with layer i at −72°·i
+ * (colours run counter-clockwise), and the wheel turns by the curvature you
+ * have picked up: +72° per step. The needle is yours and turns by −twist.
+ * The sector under the needle is always your layer (tested).
+ */
+export function dialAngles(twistDeg: number, curvatureSteps: number): { needle: number; wheel: number } {
+  return { needle: -twistDeg, wheel: curvatureSteps * LAYER_DEG };
+}
+
+/** Clockwise screen angle of layer i's sector centre on an unturned wheel. */
+export function dialSectorAngle(layer: number): number {
+  return -layer * LAYER_DEG;
+}

@@ -14,6 +14,7 @@ import type { Collider, MarbleParams } from './marble';
 import { loadLevel } from './level';
 import type { LevelSpec, LoadedLevel, ShardSpec } from './level';
 import { POST_RADIUS, WALL_HALF_WIDTH } from './world';
+import { plankOrientation, plankSmear } from '../math/four';
 import { Hunter, HUNTER_RADIUS } from './hunter';
 import { LAYER_DEG, holonomySteps, layerOf } from './phase';
 import { passageKey } from './maze';
@@ -39,6 +40,20 @@ const PORTAL_FRACTION = 0.55;
 /** Hunter speed grows by this fraction per second, up to MAX_HUNTER_SPEED. */
 const HUNTER_RAMP = 0.025;
 const MAX_HUNTER_SPEED = 2.4;
+
+/** Your 4D view turns at this many degrees per second at full input, within ±LOOK_LIMIT. */
+const LOOK_SPEED = 60;
+export const LOOK_LIMIT = 90;
+/** A rift's plank can be lined up while the marble is this close to the rift (hyperbolic units). */
+export const RIFT_RANGE = 1.3;
+/** Half-extents of a 4D plank along x (along the rift), y (across it), z and w. */
+export const PLANK_EXTENTS = [0.1, 0.32, 0.1, 0.3];
+/** Smear below which the plank counts as flat (about 4° off in XW, 6° in YW), and held this long, bridges the rift. */
+export const BRIDGE_SMEAR = 0.04;
+const BRIDGE_HOLD = 0.2;
+/** Within this smear, letting go of the view controls eases it onto the plank. */
+const ASSIST_SMEAR = 0.1;
+const ASSIST_EASE = 0.12;
 
 export interface GameSettings {
   marble: MarbleParams;
@@ -110,6 +125,13 @@ export class Game {
   private twistTarget = 0;
   /** The layer of the fourth dimension you are in, 0..4. */
   layer = 0;
+  /** Your 4D view, degrees turned in the XW and YW planes (the tesseract shows it). */
+  look: [number, number] = [0, 0];
+  /** Rifts bridged so far (wall ids). */
+  bridged = new Set<number>();
+  /** The rift you are lining up (nearest unbridged one in range), with its plank's smear, or null. */
+  riftFocus: { wall: number; smear: number } | null = null;
+  private alignedFor = 0;
 
   lives = LIVES;
   /** Seconds of protection left after a hit. */
@@ -121,6 +143,10 @@ export class Game {
   phaseEvents: PhaseEvent[] = [];
   pickupEvents: number[] = [];
   hitEvents = 0;
+  /** The layer you (and the hunter) were in at the last hit. */
+  lastHitLayer = 0;
+  /** Rifts just bridged (wall ids). */
+  bridgeEvents: number[] = [];
   /** Shifters that changed layer: which hunter, and the layer it moved into. */
   shiftEvents: { hunter: number; to: number }[] = [];
   loopEvents: LoopEvent[] = [];
@@ -150,6 +176,11 @@ export class Game {
     this.twistDeg = 0;
     this.twistTarget = 0;
     this.layer = 0;
+    this.look = [0, 0];
+    this.bridged = new Set();
+    this.riftFocus = null;
+    this.alignedFor = 0;
+    this.bridgeEvents = [];
     this.lives = LIVES;
     this.invulnerable = 0;
     this.shards = spec.shards.map((s) => ({ spec: s, collected: false }));
@@ -175,12 +206,14 @@ export class Game {
     return this.level.spec.twist !== false;
   }
 
-  /** Whether you can pass between adjacent rooms a and b while in `layer`. */
+  /** Whether you can pass between adjacent rooms a and b while in `layer` (rifts only once bridged). */
   passable(a: number, b: number, layer: number): boolean {
     const { maze, world, tiling } = this.level;
     if (maze.isRoom[a] !== 1 || maze.isRoom[b] !== 1 || !maze.open.has(passageKey(a, b))) return false;
     const id = world.wallOn(a, tiling.tiles[a].neighbors.indexOf(b));
-    return id === -1 || world.walls[id].door === layer;
+    if (id === -1) return true;
+    const w = world.walls[id];
+    return w.rift ? this.bridged.has(id) : w.door === layer;
   }
 
   /** Whether the passage between adjacent rooms a and b is a door (of any colour). */
@@ -191,13 +224,13 @@ export class Game {
     return id !== -1 && world.walls[id].door !== -1;
   }
 
-  /** Walls (minus doors open in your layer) and posts the marble can touch from its room. */
+  /** Walls (minus doors open in your layer and bridged rifts) and posts the marble can touch from its room. */
   rebuildColliders(): void {
     const { world } = this.level;
     this.colliders = [];
     for (const id of world.nearbyWalls[this.room]) {
       const w = world.walls[id];
-      if (w.door === this.layer) continue;
+      if (w.door === this.layer || this.bridged.has(id)) continue;
       this.colliders.push({ kind: 'segment', a: w.a, b: w.b, radius: WALL_HALF_WIDTH });
     }
     for (const id of world.nearbyPosts[this.room]) {
@@ -223,7 +256,7 @@ export class Game {
     return ref ? angleBetween(ref, this.carry) : 0;
   }
 
-  /** Your phase as one continuous angle (degrees): twist plus curvature. Drives the phase ring. */
+  /** Your phase as one continuous angle (degrees): twist plus curvature. */
   phaseDeg(): number {
     return this.twistDeg + holonomySteps(this.holonomy()) * LAYER_DEG;
   }
@@ -250,6 +283,12 @@ export class Game {
       best = Math.max(best, weight * (1 - Math.min(1, Math.max(0, d - 0.3) / 1.5)));
     }
     return best;
+  }
+
+  /** Hunters within `range` of you that share your layer: the ones that can see and hit you. */
+  huntersSeeingYou(range = Infinity): Hunter[] {
+    const me = this.marble.position();
+    return this.hunters.filter((h) => h.layer === this.layer && distance(h.position, me) < range);
   }
 
   /** Current hunter chase speed (units/s). */
@@ -285,6 +324,7 @@ export class Game {
     }
     this.cameraOffset *= Math.exp(-dt / CAMERA_EASE);
     this.updateLayer('twist');
+    this.updateLook(dt, input);
     this.updateHunters(dt);
     this.collectShards();
     this.checkExit();
@@ -304,6 +344,63 @@ export class Game {
       this.twistTarget = Math.round(this.twistDeg / LAYER_DEG) * LAYER_DEG;
     } else {
       this.twistDeg += (this.twistTarget - this.twistDeg) * (1 - Math.exp(-dt / PHASE_EASE));
+    }
+  }
+
+  /** Puts your 4D view back to straight ahead. */
+  resetLook(): void {
+    this.look = [0, 0];
+    this.alignedFor = 0;
+  }
+
+  /** How flat rift `wall`'s plank looks from your current 4D view (0 = flat). */
+  riftSmear(wall: number): number {
+    const target = this.level.world.walls[wall].rift!;
+    return plankSmear(plankOrientation(this.look, target), PLANK_EXTENTS);
+  }
+
+  /**
+   * Turns your 4D view, picks the rift you are working on, eases the view onto
+   * its plank when you are close and have let go, and bridges the rift once
+   * the plank has lain flat for a moment.
+   */
+  private updateLook(dt: number, input: InputSource): void {
+    const rate = input.look?.() ?? { x: 0, y: 0 };
+    const turning = Math.hypot(rate.x, rate.y) > 0.01;
+    const clamp = (v: number) => Math.max(-LOOK_LIMIT, Math.min(LOOK_LIMIT, v));
+    this.look = [clamp(this.look[0] + rate.x * LOOK_SPEED * dt), clamp(this.look[1] + rate.y * LOOK_SPEED * dt)];
+
+    // Of the unbridged rifts in range, work on the one whose plank is nearest to flat.
+    const { world } = this.level;
+    const me = this.marble.position();
+    let focus: { wall: number; smear: number } | null = null;
+    for (const id of world.nearbyWalls[this.room]) {
+      const w = world.walls[id];
+      if (!w.rift || this.bridged.has(id)) continue;
+      if (distance(me, this.level.tiling.tiles[w.tile].midpoints[w.edge]) >= RIFT_RANGE) continue;
+      const smear = this.riftSmear(id);
+      if (!focus || smear < focus.smear) focus = { wall: id, smear };
+    }
+    if (!focus) {
+      this.riftFocus = null;
+      this.alignedFor = 0;
+      return;
+    }
+    const target = world.walls[focus.wall].rift!;
+    let smear = this.riftSmear(focus.wall);
+    if (!turning && smear < ASSIST_SMEAR) {
+      const k = 1 - Math.exp(-dt / ASSIST_EASE);
+      this.look = [this.look[0] + (target[0] - this.look[0]) * k, this.look[1] + (target[1] - this.look[1]) * k];
+      smear = this.riftSmear(focus.wall);
+    }
+    this.riftFocus = { wall: focus.wall, smear };
+    this.alignedFor = smear < BRIDGE_SMEAR ? this.alignedFor + dt : 0;
+    if (this.alignedFor >= BRIDGE_HOLD) {
+      this.bridged.add(focus.wall);
+      this.bridgeEvents.push(focus.wall);
+      this.riftFocus = null;
+      this.alignedFor = 0;
+      this.rebuildColliders();
     }
   }
 
@@ -329,6 +426,7 @@ export class Game {
       if (distance(h.position, me) < this.settings.marble.radius + HUNTER_RADIUS) {
         this.lives--;
         this.hitEvents++;
+        this.lastHitLayer = h.layer;
         this.invulnerable = INVULNERABLE;
         h.respawn();
         if (this.lives <= 0) this.status = 'lost';

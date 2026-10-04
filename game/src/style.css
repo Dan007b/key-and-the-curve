@@ -790,3 +790,95 @@ canvas {
   font-size: 13px;
   color: var(--text);
 }
+
+/* ---- 4D view and rifts ------------------------------------------------------------ */
+
+.hud-look {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font: 11px ui-monospace, Consolas, monospace;
+  color: #ffcc4d;
+}
+
+.rift-meter {
+  position: absolute;
+  transform: translate(-50%, 70%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(8, 30, 40, 0.88);
+  border: 1px solid #7fe7ff;
+  color: #c9f6ff;
+  font: 700 12px ui-monospace, Consolas, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.hud-threat {
+  color: var(--good);
+  font-weight: 700;
+}
+
+.hud-threat.danger {
+  color: #ff5a6e;
+  animation: threat-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes threat-pulse {
+  50% { opacity: 0.55; }
+}
+
+/* ---- Holonomy explainer figure ------------------------------------------------- */
+
+.explain-figure svg {
+  width: 100%;
+  height: auto;
+  margin: 4px 0 10px;
+  background: #0a0e1a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.explain-figure .ex-title {
+  fill: var(--text);
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.explain-figure .ex-path {
+  fill: rgba(127, 231, 255, 0.06);
+  stroke: #9fb4e6;
+  stroke-width: 2;
+}
+
+.explain-figure .ex-arrow {
+  fill: none;
+  stroke: #9fb4e6;
+  stroke-width: 2;
+}
+
+.explain-figure .ex-turn {
+  fill: var(--muted);
+  font: 11px ui-monospace, Consolas, monospace;
+}
+
+.explain-figure .ex-angle {
+  fill: none;
+  stroke: #ffcc4d;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+
+.explain-figure .ex-caption {
+  fill: #c3cdea;
+  font: 11px 'Inter', system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.help-heading {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  color: var(--text);
+}

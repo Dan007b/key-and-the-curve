@@ -1,7 +1,8 @@
 /**
- * Recipes for the generated levels (5–7). `npm run levels` turns each one
- * into levels/<n>-<name>.json with the generator (generator.ts), which only
- * keeps levels the solver proves fair. Levels 1–4 and 8 were laid out by hand.
+ * Recipes for the generated levels (2 and 6–8). `npm run levels` turns each
+ * one into levels/<n>-<name>.json with the generator (generator.ts), which
+ * only keeps levels the solver proves fair. Levels 1, 3–5 and 9 were laid out
+ * by hand.
  *
  * Regenerating is deterministic: the same recipe always gives the same file.
  * Edit the recipe (not the JSON) and rerun, then run the tests.
@@ -11,7 +12,23 @@ import type { LevelRecipe } from './generator';
 
 export const RECIPES: { file: string; recipe: LevelRecipe }[] = [
   {
-    file: '5-shifter.json',
+    file: '2-rift.json',
+    recipe: {
+      name: 'Rift',
+      seed: 11,
+      depth: 2,
+      extraOpenings: 1,
+      doors: 0,
+      rifts: 2,
+      shards: 2,
+      hunters: [],
+      intro:
+        'Your marble carries a tesseract, a 4D cube: it is the picture in the corner, and it is how you look at the world. The glowing cracks are rifts. Over each one floats a plank that is four-dimensional, so all you see is its smeared shadow. Hold Shift and use the arrow keys (or hold BOOT and tilt the controller) to turn your view into the fourth dimension. The tesseract turns, the shadow shifts, and when the plank lies flat over the crack it becomes a bridge.',
+      hint: 'Rift: hold Shift + arrows (or BOOT + tilt) to turn your 4D view until the plank lies flat. F straightens your view.',
+    },
+  },
+  {
+    file: '6-shifter.json',
     recipe: {
       name: 'Shifter',
       seed: 21,
@@ -27,7 +44,7 @@ export const RECIPES: { file: string; recipe: LevelRecipe }[] = [
     },
   },
   {
-    file: '6-orbit.json',
+    file: '7-orbit.json',
     recipe: {
       name: 'Orbit',
       seed: 31,
@@ -45,18 +62,19 @@ export const RECIPES: { file: string; recipe: LevelRecipe }[] = [
     },
   },
   {
-    file: '7-flux.json',
+    file: '8-flux.json',
     recipe: {
       name: 'Flux',
       seed: 41,
       depth: 3,
       extraOpenings: 5,
       doors: 3,
+      rifts: 1,
       shards: 4,
       hunters: [{ layer: 1, shiftEvery: 7 }, { layer: 3, shiftEvery: 7, shiftStep: -1 }, { layer: 0 }],
       hunterSpeed: 0.9,
       intro:
-        'Two shifters cycle through the colours in opposite directions, and a red hunter never leaves red. The ring around your 4D body shows which colour every hunter is in right now (shifters have a white outline).',
+        'Two shifters cycle through the colours in opposite directions, and a red hunter never leaves red. The ring around your 4D view shows which colour every hunter is in right now (shifters have a white outline). There is a rift on the way: bridge it with your 4D view while they hunt you.',
       hint: 'Two shifters, opposite ways round. Check the phase ring before you phase.',
     },
   },

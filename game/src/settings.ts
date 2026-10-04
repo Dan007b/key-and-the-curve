@@ -25,7 +25,7 @@ export interface Settings {
   music: boolean;
   /** Music volume, 0..1. */
   musicVolume: number;
-  /** Tutorial tips on level 1. */
+  /** Tutorial tips on the teaching levels (Slip, Rift, Hunted). */
   tutorial: boolean;
 }
 
@@ -128,7 +128,7 @@ export function settingsForm(initial: Settings, onChange: (s: Settings) => void)
   section('Game');
   slider('Rolling friction', 0.2, 3, 0.05, () => s.damping, (v) => (s.damping = v), (v) => `${v.toFixed(2)} /s`);
   checkbox('Holonomy trail (T)', () => s.trail, (v) => (s.trail = v));
-  checkbox('Tutorial tips on level 1', () => s.tutorial, (v) => (s.tutorial = v));
+  checkbox('Tutorial tips (levels 1–3)', () => s.tutorial, (v) => (s.tutorial = v));
   checkbox('Sound (M)', () => s.sound, (v) => (s.sound = v));
   checkbox('Music (N)', () => s.music, (v) => (s.music = v));
   slider('Music volume', 0, 1, 0.05, () => s.musicVolume, (v) => (s.musicVolume = v), (v) => `${Math.round(v * 100)}%`);
