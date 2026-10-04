@@ -882,3 +882,14 @@ canvas {
   font-size: 14px;
   color: var(--text);
 }
+
+.connect-choices {
+  display: flex;
+  gap: 10px;
+  margin: 6px 0 8px;
+}
+
+.connect-choices .hud-button {
+  font-size: 13px;
+  padding: 9px 14px;
+}

@@ -11,6 +11,10 @@ export interface InputStatus {
   calibration?: number;
   /** Samples per second actually received. */
   hz?: number;
+  /** Bluetooth: percentage of samples lost over the last second. */
+  lossPercent?: number;
+  /** A short state note, e.g. "reconnecting…". */
+  note?: string;
 }
 
 export interface InputSource {

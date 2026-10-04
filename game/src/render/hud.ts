@@ -176,8 +176,9 @@ export class Hud {
     this.status.innerHTML = '';
     for (const st of s.inputs) {
       const line = el('div', st.connected ? 'ok' : 'off', this.status);
-      let text = `${st.label}: ${st.connected ? 'connected' : 'not connected'}`;
+      let text = `${st.label}: ${st.connected ? 'connected' : st.note ?? 'not connected'}`;
       if (st.connected && st.hz !== undefined) text += ` · ${Math.round(st.hz)} Hz`;
+      if (st.connected && st.lossPercent !== undefined && st.lossPercent >= 1) text += ` · ${Math.round(st.lossPercent)}% lost`;
       if (st.connected && st.calibration !== undefined) {
         const d = String(st.calibration).padStart(4, '0');
         text += ` · cal S${d[0]} G${d[1]} A${d[2]} M${d[3]}`;

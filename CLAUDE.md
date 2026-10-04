@@ -94,6 +94,7 @@ Confirm every pin with Danny before using it.
 - **Trigger** is the DevKitC's own BOOT button (GPIO0, pressed = LOW); there are no other buttons (confirmed). Firmware reports the debounced held state; the **game** turns presses into a toggle: first press enters twist mode, second press exits. The game owns the mode so it can force it off (levels with twist disabled, level load).
 - **No reset-key button** (confirmed). Reset the key with R or an on-screen button.
 - **No vibration motor** (confirmed). The firmware still accepts `V,<n>` and ignores it.
+- **Wireless (added 2026-10-04):** powered by 4 × AA across 5V/VIN and GND (no battery-sense wire); external pull-ups added on SDA/SCL (Danny reported 1 kΩ and 220 Ω; 220 Ω is far too strong, recommended 2.2–4.7 kΩ to 3V3, see HARDWARE.md). The controller streams over **BLE** (NimBLE, name "PhaseEscape", 16-byte sample notifications) as well as USB serial; the game connects with Web Bluetooth or Web Serial (`input/ControllerInput.ts`).
 
 ### Firmware behavior
 

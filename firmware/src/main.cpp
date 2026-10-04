@@ -1,7 +1,8 @@
-// The Key and the Curve: controller firmware (ESP32-DevKitC V4 + Adafruit BNO055).
+// Phase Escape: controller firmware (ESP32-DevKitC V4 + Adafruit BNO055).
 //
-// Streams fused orientation, gravity, gyro rate, calibration status and button
-// state at 100 Hz over the board's USB-UART bridge, one line per sample:
+// Streams gravity, gyro rate, calibration status and button state at 100 Hz,
+// both wirelessly over Bluetooth Low Energy (see "Bluetooth" below) and over
+// the board's USB-UART bridge. Over USB it sends one line per sample:
 //
 //   $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn\n
 //
@@ -20,13 +21,29 @@
 //   S          save calibration offsets to NVS, only if fully calibrated (3/3/3/3)
 //   P          ping, answers "#pong"
 //
-// See docs/HARDWARE.md for wiring and the calibration procedure.
+// Bluetooth Low Energy: advertises as "PhaseEscape" with one GATT service
+// (UUIDs below; the game has the same ones in serialProtocol.ts):
+//   sample   notify, 16 bytes per sample, little-endian:
+//              [0] format version (1)   [1] sequence number (wraps at 256)
+//              [2] buttons (bit0 = BOOT) [3] calibration, 2 bits each:
+//                                            sys<<6 | gyr<<4 | acc<<2 | mag
+//              [4..9]   gravity x, y, z, int16, units of 0.01 m/s^2
+//              [10..15] gyro x, y, z, int16, units of 1/16 deg/s
+//            Both are the BNO055's own register units, so nothing is lost.
+//            The quaternion is not sent: the game doesn't use it, and leaving
+//            it out keeps a sample within one 20-byte notification.
+//   command  write: the same commands as over USB ("P", "S", "V,n"), no newline
+//   log      notify: the '#' lines, one per notification (cut to fit if long)
+//
+// See docs/HARDWARE.md for wiring, power and the calibration procedure.
 
 #include <Arduino.h>
 #include <Wire.h>
 #include <Preferences.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
+#include <NimBLEDevice.h>
+#include <stdarg.h>
 
 // ---- Hardware configuration (confirmed by Danny, 2026-10-03) ----------------
 
@@ -76,6 +93,104 @@ static constexpr uint32_t kClockSettleMs = 700;
 static const char* const kPrefsNamespace = "bno055";
 static const char* const kPrefsKeyOffsets = "offsets";
 
+// ---- Bluetooth ---------------------------------------------------------------
+
+static const char* const kBleName = "PhaseEscape";
+static const char* const kServiceUuid = "6f1c0001-3b0e-4b7c-9f4a-2d8e5a7c1b90";
+static const char* const kSampleUuid = "6f1c0002-3b0e-4b7c-9f4a-2d8e5a7c1b90";
+static const char* const kCommandUuid = "6f1c0003-3b0e-4b7c-9f4a-2d8e5a7c1b90";
+static const char* const kLogUuid = "6f1c0004-3b0e-4b7c-9f4a-2d8e5a7c1b90";
+static constexpr uint8_t kSampleFormat = 1;
+
+static NimBLEServer* bleServer = nullptr;
+static NimBLECharacteristic* sampleChar = nullptr;
+static NimBLECharacteristic* logChar = nullptr;
+
+// A command written over BLE arrives on the Bluetooth task. It is copied here
+// and run from loop(), so I2C and NVS are only ever touched by one task.
+static portMUX_TYPE bleCmdLock = portMUX_INITIALIZER_UNLOCKED;
+static char bleCmd[32];
+static volatile bool bleCmdPending = false;
+
+static bool bleConnected() {
+    return bleServer != nullptr && bleServer->getConnectedCount() > 0;
+}
+
+// Writes a '#' status line to USB serial and, when a client is connected, to
+// the BLE log characteristic. Call from loop()/setup() only.
+static void hostLog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void hostLog(const char* fmt, ...) {
+    char buf[128];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    Serial.println(buf);
+    if (logChar != nullptr && bleConnected()) {
+        logChar->setValue(reinterpret_cast<const uint8_t*>(buf), strlen(buf));
+        logChar->notify();
+    }
+}
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* server, ble_gap_conn_desc* desc) override {
+        // Ask for a short connection interval (7.5-15 ms) so 100 Hz samples
+        // arrive promptly; the host may choose something else.
+        server->updateConnParams(desc->conn_handle, 6, 12, 0, 200);
+    }
+    // NimBLE restarts advertising on disconnect by default.
+};
+
+class CommandCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* c) override {
+        const NimBLEAttValue v = c->getValue();
+        portENTER_CRITICAL(&bleCmdLock);
+        if (!bleCmdPending) {
+            const size_t n = v.length() < sizeof(bleCmd) - 1 ? v.length() : sizeof(bleCmd) - 1;
+            memcpy(bleCmd, v.data(), n);
+            bleCmd[n] = '\0';
+            bleCmdPending = true;
+        }
+        portEXIT_CRITICAL(&bleCmdLock);
+    }
+};
+
+static void startBle() {
+    NimBLEDevice::init(kBleName);
+    bleServer = NimBLEDevice::createServer();
+    bleServer->setCallbacks(new ServerCallbacks());
+    NimBLEService* service = bleServer->createService(kServiceUuid);
+    sampleChar = service->createCharacteristic(kSampleUuid, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+    NimBLECharacteristic* command =
+        service->createCharacteristic(kCommandUuid, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+    command->setCallbacks(new CommandCallbacks());
+    logChar = service->createCharacteristic(kLogUuid, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+    service->start();
+
+    // Advertise the service (so the game can filter on it) and the name, in the
+    // scan response (flags + 128-bit UUID already fill 21 of the 31 bytes).
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    NimBLEAdvertisementData data;
+    data.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
+    data.setCompleteServices(NimBLEUUID(kServiceUuid));
+    adv->setAdvertisementData(data);
+    NimBLEAdvertisementData response;
+    response.setName(kBleName);
+    adv->setScanResponseData(response);
+    adv->start();
+    hostLog("#ble advertising as %s", kBleName);
+}
+
+// Encodes v as a little-endian int16 at p, rounded and clamped.
+static void putInt16(uint8_t* p, double v) {
+    long r = lround(v);
+    if (r > 32767) r = 32767;
+    if (r < -32768) r = -32768;
+    const uint16_t u = static_cast<uint16_t>(static_cast<int16_t>(r));
+    p[0] = u & 0xFF;
+    p[1] = u >> 8;
+}
+
 // ---- Buttons -----------------------------------------------------------------
 
 // A button wired from a GPIO to GND with the internal pull-up, so LOW = pressed.
@@ -121,7 +236,7 @@ static uint8_t scanI2c() {
     for (uint8_t addr = 1; addr < 127; ++addr) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
-            Serial.printf("#i2c device at 0x%02X\n", addr);
+            hostLog("#i2c device at 0x%02X", addr);
             ++found;
             if (bnoAddr == 0 && (addr == BNO055_ADDRESS_A || addr == BNO055_ADDRESS_B)) {
                 bnoAddr = addr;
@@ -129,7 +244,7 @@ static uint8_t scanI2c() {
         }
     }
     if (found == 0) {
-        Serial.println("#i2c no devices found (check wiring and power)");
+        hostLog("#i2c no devices found (check wiring and power)");
     }
     return bnoAddr;
 }
@@ -148,9 +263,9 @@ static void loadCalibration() {
 
     if (n == sizeof(offsets)) {
         bno->setSensorOffsets(offsets);
-        Serial.println("#cal loaded from NVS");
+        hostLog("#cal loaded from NVS");
     } else {
-        Serial.println("#cal none stored (calibrate, then send S)");
+        hostLog("#cal none stored (calibrate, then send S)");
     }
 }
 
@@ -159,25 +274,25 @@ static void loadCalibration() {
 // pauses for ~50 ms and fusion restarts; that is fine for a one-off command.
 static void saveCalibration() {
     if (bno == nullptr) {
-        Serial.println("#cal not saved: no sensor");
+        hostLog("#cal not saved: no sensor");
         return;
     }
     uint8_t sys, gyr, acc, mag;
     bno->getCalibration(&sys, &gyr, &acc, &mag);
     if (sys < 3 || gyr < 3 || acc < 3 || mag < 3) {
-        Serial.printf("#cal not saved: not fully calibrated (sys=%u gyr=%u acc=%u mag=%u)\n",
+        hostLog("#cal not saved: not fully calibrated (sys=%u gyr=%u acc=%u mag=%u)",
                       sys, gyr, acc, mag);
         return;
     }
     adafruit_bno055_offsets_t offsets;
     if (!bno->getSensorOffsets(offsets)) {
-        Serial.println("#cal not saved: calibration dropped while reading offsets");
+        hostLog("#cal not saved: calibration dropped while reading offsets");
         return;
     }
     prefs.begin(kPrefsNamespace, /*readOnly=*/false);
     const size_t written = prefs.putBytes(kPrefsKeyOffsets, &offsets, sizeof(offsets));
     prefs.end();
-    Serial.println(written == sizeof(offsets) ? "#cal saved to NVS" : "#cal not saved: NVS write failed");
+    hostLog("%s", written == sizeof(offsets) ? "#cal saved to NVS" : "#cal not saved: NVS write failed");
 }
 
 // Prints the BNO055's operating mode and system status/error registers
@@ -186,7 +301,7 @@ static void saveCalibration() {
 static void printSensorState(const char* when) {
     uint8_t status = 0, selfTest = 0, error = 0;
     bno->getSystemStatus(&status, &selfTest, &error);
-    Serial.printf("#bno055 %s: mode %u, status %u, error %u\n",
+    hostLog("#bno055 %s: mode %u, status %u, error %u",
                   when, (unsigned)bno->getMode(), status, error);
 }
 
@@ -194,12 +309,12 @@ static void printSensorState(const char* when) {
 static bool initSensor() {
     const uint8_t addr = scanI2c();
     if (addr == 0) {
-        Serial.println("#bno055 not found at 0x28 or 0x29");
+        hostLog("#bno055 not found at 0x28 or 0x29");
         return false;
     }
     bno = new Adafruit_BNO055(55, addr, &Wire);
     if (!bno->begin(OPERATION_MODE_NDOF)) {
-        Serial.printf("#bno055 at 0x%02X did not initialize\n", addr);
+        hostLog("#bno055 at 0x%02X did not initialize", addr);
         delete bno;
         bno = nullptr;
         return false;
@@ -212,7 +327,7 @@ static bool initSensor() {
     bno->setExtCrystalUse(BNO055_EXT_CRYSTAL);
     delay(kClockSettleMs);
     loadCalibration();
-    Serial.printf("#bno055 ok at 0x%02X, NDOF, ext crystal %s, i2c %u Hz\n",
+    hostLog("#bno055 ok at 0x%02X, NDOF, ext crystal %s, i2c %u Hz",
                   addr, BNO055_EXT_CRYSTAL ? "on" : "off", (unsigned)I2C_CLOCK_HZ);
     printSensorState("after init");
     return true;
@@ -251,6 +366,24 @@ static bool streamSample() {
     if (n > 0 && n < (int)sizeof(line)) {
         Serial.write(reinterpret_cast<const uint8_t*>(line), n);
     }
+
+    if (sampleChar != nullptr && bleConnected()) {
+        static uint8_t seq = 0;
+        uint8_t pkt[16];
+        pkt[0] = kSampleFormat;
+        pkt[1] = seq++;
+        pkt[2] = static_cast<uint8_t>(btn);
+        pkt[3] = static_cast<uint8_t>((sys << 6) | (gyr << 4) | (acc << 2) | mag);
+        // Back to the BNO055's register units: 100 LSB per m/s^2, 16 LSB per deg/s.
+        putInt16(pkt + 4, g.x() * 100);
+        putInt16(pkt + 6, g.y() * 100);
+        putInt16(pkt + 8, g.z() * 100);
+        putInt16(pkt + 10, w.x() * 16);
+        putInt16(pkt + 12, w.y() * 16);
+        putInt16(pkt + 14, w.z() * 16);
+        sampleChar->setValue(pkt, sizeof(pkt));
+        sampleChar->notify();
+    }
     return true;
 }
 
@@ -261,18 +394,18 @@ static void handleCommand(const char* cmd) {
         return;
     }
     if (strcmp(cmd, "P") == 0) {
-        Serial.println("#pong");
+        hostLog("#pong");
     } else if (strcmp(cmd, "S") == 0) {
         saveCalibration();
     } else if (strncmp(cmd, "V,", 2) == 0) {
         char* end = nullptr;
         const long v = strtol(cmd + 2, &end, 10);
         if (end == cmd + 2 || *end != '\0' || v < 0 || v > 255) {
-            Serial.printf("#err bad vibration value: %s\n", cmd);
+            hostLog("#err bad vibration value: %s", cmd);
         }
         // Valid values are accepted silently: no vibration motor is fitted.
     } else {
-        Serial.printf("#err unknown command: %s\n", cmd);
+        hostLog("#err unknown command: %s", cmd);
     }
 }
 
@@ -303,6 +436,24 @@ static void pollCommands() {
     }
 }
 
+// Runs a command that arrived over BLE, if one is waiting.
+static void pollBleCommand() {
+    if (!bleCmdPending) {
+        return;
+    }
+    char cmd[sizeof(bleCmd)];
+    portENTER_CRITICAL(&bleCmdLock);
+    memcpy(cmd, bleCmd, sizeof(cmd));
+    bleCmdPending = false;
+    portEXIT_CRITICAL(&bleCmdLock);
+    // Tolerate a trailing newline, as over USB.
+    const size_t len = strlen(cmd);
+    if (len > 0 && (cmd[len - 1] == '\n' || cmd[len - 1] == '\r')) {
+        cmd[len - 1] = '\0';
+    }
+    handleCommand(cmd);
+}
+
 // ---- Main loop ---------------------------------------------------------------
 
 static uint32_t nextSampleUs = 0;
@@ -315,9 +466,10 @@ static uint32_t samplesWithoutFusion = 0;
 void setup() {
     Serial.begin(kBaud);
     Serial.println();
-    Serial.println("#key-and-the-curve controller fw (esp32dev)");
+    hostLog("#phase-escape controller fw (esp32dev, usb + ble)");
 
     trigger.begin();
+    startBle();
 
     Wire.begin(kPinSda, kPinScl, I2C_CLOCK_HZ);
     while (millis() < kBnoBootMs) {
@@ -333,6 +485,7 @@ void loop() {
     const uint32_t nowMs = millis();
     trigger.update(nowMs);
     pollCommands();
+    pollBleCommand();
 
     if (bno == nullptr) {
         if (nowMs - lastRetryMs >= kSensorRetryMs) {
@@ -360,7 +513,7 @@ void loop() {
             samplesWithoutFusion = 0;
         } else if (++samplesWithoutFusion >= kFusionTimeoutSamples) {
             printSensorState("no fusion output for 2 s");
-            Serial.println("#bno055 restarting sensor");
+            hostLog("#bno055 restarting sensor");
             delete bno;
             bno = nullptr;
             samplesWithoutFusion = 0;
@@ -372,7 +525,7 @@ void loop() {
     // Periodic rate report, handy for checking the ~100 Hz target in a monitor.
     if (nowMs - statsStartMs >= kStatsPeriodMs) {
         const float hz = statsSamples * 1000.0f / (nowMs - statsStartMs);
-        Serial.printf("#hz %.1f overruns %u\n", hz, (unsigned)statsOverruns);
+        hostLog("#hz %.1f overruns %u", hz, (unsigned)statsOverruns);
         statsStartMs = nowMs;
         statsSamples = statsOverruns = 0;
     }

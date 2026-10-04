@@ -9,7 +9,8 @@ import type { ViewState } from './render/diskView';
 import { Hud } from './render/hud';
 import { KeyView } from './render/keyView';
 import { KeyboardInput } from './input/KeyboardInput';
-import { SerialInput } from './input/SerialInput';
+import { ControllerInput } from './input/ControllerInput';
+import type { Link } from './input/ControllerInput';
 import { CombinedInput } from './input/CombinedInput';
 import { Game, LIVES } from './game/game';
 import { LEVELS, levelIndex as indexOfLevel } from './game/level';
@@ -36,8 +37,8 @@ app.appendChild(canvas);
 const view = new DiskView(canvas);
 const hud = new Hud(app);
 const keyboard = new KeyboardInput(canvas, () => view.diskRadiusPx);
-const serial = new SerialInput();
-const input = new CombinedInput(keyboard, serial);
+const controller = new ControllerInput();
+const input = new CombinedInput(keyboard, controller);
 const game = new Game();
 const keyView = new KeyView();
 const sound = new Sound();
@@ -60,9 +61,9 @@ let ahaShown = false;
 function applySettings(s: Settings): void {
   settings = s;
   game.settings.marble.damping = s.damping;
-  serial.tiltSettings = { fullTiltDeg: s.fullTiltDeg, deadzone: s.deadzone, invertX: s.invertX, invertY: s.invertY, swapXY: s.swapXY };
-  serial.phaseGain = s.phaseGain;
-  serial.phaseInvert = s.phaseInvert;
+  controller.tiltSettings = { fullTiltDeg: s.fullTiltDeg, deadzone: s.deadzone, invertX: s.invertX, invertY: s.invertY, swapXY: s.swapXY };
+  controller.phaseGain = s.phaseGain;
+  controller.phaseInvert = s.phaseInvert;
   sound.enabled = s.sound;
   music.configure(s.sound && s.music, s.musicVolume);
   saveSettings(s);
@@ -320,23 +321,58 @@ function demoInput(): Autopilot | null {
 
 // ---- Buttons and keys ----------------------------------------------------------
 
-if (SerialInput.supported()) {
-  const connectButton = hud.button('Connect controller', 'Pick the ESP32 serial port', () => {
-    if (serial.connected()) {
-      void serial.disconnect();
+/** Connects the controller over Bluetooth or USB; reports failures (a cancelled chooser is not one). */
+function connectController(how: Link): void {
+  const attempt = how === 'bluetooth' ? controller.connectBluetooth() : controller.connectSerial();
+  attempt.catch((err: unknown) => {
+    if (err instanceof DOMException && err.name === 'NotFoundError') return;
+    pauseWith(
+      'Could not connect the controller',
+      how === 'bluetooth'
+        ? `${String(err)}\nIs the controller switched on and nearby, and Bluetooth on in Windows? Only one app can use it at a time.`
+        : `${String(err)}\nIs another program (a serial monitor) using the port?`,
+      'OK',
+    );
+  });
+}
+
+/** Lets you pick Bluetooth or a USB cable. Each button connects straight from its click (browsers require a click). */
+function showConnect(): void {
+  const row = document.createElement('div');
+  row.className = 'connect-choices';
+  const choice = (label: string, how: Link) => {
+    const b = document.createElement('button');
+    b.className = 'hud-button';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      hud.closeCard();
+      connectController(how);
+    });
+    row.appendChild(b);
+  };
+  if (ControllerInput.bluetoothSupported()) choice('Bluetooth (wireless)', 'bluetooth');
+  if (ControllerInput.serialSupported()) choice('USB cable', 'usb');
+  pauseWith(
+    'Connect the controller',
+    'Bluetooth: switch the controller on and pick "PhaseEscape". No pairing in Windows settings is needed.\nUSB: plug it in with a data cable (and take the batteries out, or switch them off, first).',
+    'Cancel',
+    row,
+  );
+}
+
+if (ControllerInput.bluetoothSupported() || ControllerInput.serialSupported()) {
+  const connectButton = hud.button('Connect controller', 'Connect the controller over Bluetooth or a USB cable', () => {
+    if (controller.connected()) {
+      void controller.disconnect();
       return;
     }
-    serial.connect().catch((err: unknown) => {
-      if (!(err instanceof DOMException && err.name === 'NotFoundError')) {
-        pauseWith('Could not open the controller', `${String(err)}\nIs another program (a serial monitor) using the port?`, 'OK');
-      }
-    });
+    showConnect();
   });
   setInterval(() => {
-    connectButton.textContent = serial.connected() ? 'Disconnect controller' : 'Connect controller';
+    connectButton.textContent = controller.connected() ? 'Disconnect controller' : 'Connect controller';
   }, 500);
   hud.button('Set level', 'Hold the controller the way you want "flat" to be, then click', () => {
-    if (!serial.setLevel()) pauseWith('No controller data yet', 'Connect the controller first.', 'OK');
+    if (!controller.setLevel()) pauseWith('No controller data yet', 'Connect the controller first.', 'OK');
   });
 }
 hud.button('Watch demo', 'Level 3 plays itself: curvature moves you through the fourth dimension', startDemo);

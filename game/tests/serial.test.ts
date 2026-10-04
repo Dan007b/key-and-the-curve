@@ -109,7 +109,7 @@ describe('recorded controller output', () => {
     expect(good.length).toBeGreaterThan(190);
     expect(samples.length - good.length).toBeLessThanOrEqual(1);
     for (const s of good) {
-      expect(Math.hypot(...s!.quat)).toBeCloseTo(1, 2);
+      expect(Math.hypot(...s!.quat!)).toBeCloseTo(1, 2);
       expect(Math.hypot(...s!.gravity)).toBeGreaterThan(9.5);
     }
     // At rest, tilt relative to its own first reading stays inside the deadzone.

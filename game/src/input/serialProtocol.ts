@@ -1,14 +1,18 @@
 /**
- * The controller's line protocol (CLAUDE.md §5, docs/HARDWARE.md) and the
- * pure maths that turns a sample into game input. No I/O here, so it is all
+ * The controller's protocols (CLAUDE.md §5, docs/HARDWARE.md) and the pure
+ * maths that turns a sample into game input. No I/O here, so it is all
  * unit-tested.
  *
+ * USB serial, one text line per sample:
+ *
  *   $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn
+ *
+ * Bluetooth Low Energy, one 16-byte notification per sample (parseBlePacket).
  */
 
 export interface Sample {
-  /** Fused orientation quaternion (w, x, y, z). */
-  quat: [number, number, number, number];
+  /** Fused orientation quaternion (w, x, y, z); null over Bluetooth, which doesn't send it (the game doesn't use it). */
+  quat: [number, number, number, number] | null;
   /** Gravity in the sensor frame, m/s². Points up (away from the Earth) when at rest. */
   gravity: [number, number, number];
   /** Angular velocity in the sensor frame, rad/s. */
@@ -162,4 +166,41 @@ export class BootButton {
     this.taps = 0;
     return n;
   }
+}
+
+// ---- Bluetooth Low Energy -------------------------------------------------------
+
+/** Must match firmware/src/main.cpp. */
+export const BLE_NAME = 'PhaseEscape';
+export const BLE_SERVICE = '6f1c0001-3b0e-4b7c-9f4a-2d8e5a7c1b90';
+export const BLE_SAMPLE = '6f1c0002-3b0e-4b7c-9f4a-2d8e5a7c1b90';
+export const BLE_COMMAND = '6f1c0003-3b0e-4b7c-9f4a-2d8e5a7c1b90';
+export const BLE_LOG = '6f1c0004-3b0e-4b7c-9f4a-2d8e5a7c1b90';
+const BLE_FORMAT = 1;
+
+/**
+ * Decodes one BLE sample notification (16 bytes, little-endian):
+ *
+ *   [0] format (1)  [1] sequence  [2] buttons  [3] calibration sys<<6|gyr<<4|acc<<2|mag
+ *   [4..9]   gravity x, y, z: int16, 0.01 m/s²
+ *   [10..15] gyro x, y, z: int16, 1/16 °/s (converted to rad/s here)
+ *
+ * Returns the sample and its sequence number, or null for anything else
+ * (wrong length or format version).
+ */
+export function parseBlePacket(view: DataView): { sample: Sample; seq: number } | null {
+  if (view.byteLength !== 16 || view.getUint8(0) !== BLE_FORMAT) return null;
+  const c = view.getUint8(3);
+  const i16 = (o: number) => view.getInt16(o, true);
+  const gyro = (o: number) => ((i16(o) / 16) * Math.PI) / 180;
+  return {
+    seq: view.getUint8(1),
+    sample: {
+      quat: null,
+      gravity: [i16(4) / 100, i16(6) / 100, i16(8) / 100],
+      gyro: [gyro(10), gyro(12), gyro(14)],
+      calibration: ((c >> 6) & 3) * 1000 + ((c >> 4) & 3) * 100 + ((c >> 2) & 3) * 10 + (c & 3),
+      buttons: view.getUint8(2),
+    },
+  };
 }

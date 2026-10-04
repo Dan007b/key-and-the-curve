@@ -6,10 +6,10 @@
 
 import type { InputSource, InputStatus } from './InputSource';
 import type { KeyboardInput } from './KeyboardInput';
-import type { SerialInput } from './SerialInput';
+import type { ControllerInput } from './ControllerInput';
 
 export class CombinedInput implements InputSource {
-  constructor(private readonly keyboard: KeyboardInput, private readonly serial: SerialInput) {}
+  constructor(private readonly keyboard: KeyboardInput, private readonly serial: ControllerInput) {}
 
   update(dt: number): void {
     this.keyboard.update(dt);

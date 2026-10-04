@@ -70,6 +70,17 @@ Danny's questions: how does a lap round a pole change the dimension? Do differen
 - [x] **Holonomy explained:** the phase ring is now a colour wheel painted on the world (turned by curvature) with a carried needle (turned by twist); the holonomy card and help show flat vs curved squares (4 × 108° = 432° = 360° + 72°). Help answers the straight-path question: in the hyperbolic plane there is one straight path between two points; what changes is the orientation you arrive with (72° per pillar between two routes).
 - [x] 140 tests; README, MATH.md §8–9, HARDWARE.md (BOOT tap/hold), DEMO.md, screenshots (new `?scene=rift`), desktop rebuilt.
 
+## Pass 4: wireless controller
+
+Danny added 4 × AA (across 5V/VIN and GND) and external SDA/SCL pull-ups, and wants Bluetooth because a tethered controller is awkward.
+
+- [x] Firmware streams over **BLE** (NimBLE-Arduino 1.4.3) as well as USB: advertises "PhaseEscape"; sample notify (16 bytes: format, seq, buttons, packed cal, gravity ×100, gyro ×16 °/s, int16 LE), command write (P/S/V), log notify ('#' lines). Commands from BLE are queued and run in `loop()`. Builds: 47% flash, 11% RAM, no warnings.
+- [x] Game: `SerialInput` → `ControllerInput` with `connectBluetooth()` / `connectSerial()`, shared sample handling (tilt, dial, BOOT tap/hold), auto-reconnect over BLE (8 tries), loss % in the HUD. "Connect controller" opens a Bluetooth / USB chooser.
+- [x] Desktop app picks the BLE controller in `select-bluetooth-device` (15 s scan timeout).
+- [x] Tests: BLE packet decode, rejection, and BLE vs USB give identical controls (143 tests). HARDWARE.md: Bluetooth, power, pull-ups.
+- [ ] **Not tried on hardware yet:** flash it (batteries off, USB in), then on batteries connect over Bluetooth in Chrome/Edge and in the desktop app; check ~100 Hz and loss in the corner, BOOT tap/hold, Set level.
+- [ ] **Pull-ups:** 220 Ω (and 1 kΩ) are too strong for I2C; swap for 2.2–4.7 kΩ to 3V3. Make sure they and the BNO055's VIN are on 3V3, not the ~6 V battery line.
+
 ## Not yet verified / next ideas
 
 - Old build folder `desktop/out/The Key and the Curve-win32-x64` (368 MB) is still there: that app was running during this pass. Close it, then delete the folder.

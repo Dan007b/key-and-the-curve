@@ -54,7 +54,7 @@ Levels 2 and 6–8 come from a **level generator** (`game/src/game/generator.ts`
 
 ## Run it
 
-**Windows desktop app:** `cd desktop`, `npm install`, `npm run package`, then double-click `desktop\out\Phase Escape-win32-x64\Phase Escape.exe`. Copy the whole folder to share it. It finds the controller's port by itself.
+**Windows desktop app:** `cd desktop`, `npm install`, `npm run package`, then double-click `desktop\out\Phase Escape-win32-x64\Phase Escape.exe`. Copy the whole folder to share it. It finds the controller by itself, over Bluetooth or USB.
 
 **Browser:**
 
@@ -64,11 +64,11 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in Chrome or Edge (they have Web Serial, which the controller needs). Keyboard and mouse are enough to play.
+Open http://localhost:5173 in Chrome or Edge (they have Web Bluetooth and Web Serial, which the controller needs). Keyboard and mouse are enough to play.
 
 ## The controller (optional)
 
-An ESP32-DevKitC V4 with an Adafruit BNO055 orientation sensor, streaming fused orientation, gravity and gyro at 100 Hz over USB. Wiring, calibration and the protocol are in [docs/HARDWARE.md](docs/HARDWARE.md). Click **Connect controller**, hold it the way you want "flat" to be, and click **Set level**. Tilting rolls the marble; turning the controller about that vertical, like a dial, slides you through the layers (tilting barely affects it, so the two don't fight). Sensitivity and directions are under **Settings**.
+An ESP32-DevKitC V4 with an Adafruit BNO055 orientation sensor, on four AA batteries, streaming gravity and gyro at 100 Hz over **Bluetooth Low Energy** (or over USB when plugged in). Wiring, power, calibration and both protocols are in [docs/HARDWARE.md](docs/HARDWARE.md). Click **Connect controller**, choose **Bluetooth** (or USB), pick "PhaseEscape", hold the controller the way you want "flat" to be, and click **Set level**. If the wireless link drops, the game reconnects by itself. Tilting rolls the marble; turning the controller about that vertical, like a dial, slides you through the layers (tilting barely affects it, so the two don't fight). Sensitivity and directions are under **Settings**.
 
 ```powershell
 cd firmware
@@ -90,13 +90,13 @@ The full explanation, written for a curious non-expert, is in [docs/MATH.md](doc
 ## Project layout
 
 ```
-desktop/       Electron wrapper: Windows app, automatic controller port selection
-firmware/      PlatformIO project: ESP32 + BNO055 at 100 Hz, tools/
+desktop/       Electron wrapper: Windows app, picks the controller (Bluetooth or USB) by itself
+firmware/      PlatformIO project: ESP32 + BNO055 at 100 Hz over BLE and USB, tools/
 game/
   src/math/    pure, tested maths: lorentz, poincare, geodesic, tiling, four
   src/game/    marble, maze, transport (holonomy), phase, hunter, game, levels,
                solver, generator + recipes, tutorial, autopilot
-  src/input/   keyboard/mouse, Web Serial controller, protocol parsing
+  src/input/   keyboard/mouse, the controller over Web Bluetooth or Web Serial, protocol parsing
   src/render/  Poincaré disk view, 4D view inset, HUD, holonomy figure
   src/         main, sound effects, music, scores, settings
   levels/      the nine levels (JSON)
@@ -107,7 +107,7 @@ docs/          MATH.md, HARDWARE.md, DEMO.md, screenshots
 
 ## Tests
 
-`cd game` then `npm test`. There are 140 tests:
+`cd game` then `npm test`. There are 143 tests:
 - **Geometry:** isometries, distances, re-orthonormalisation, the disk models, geodesic segments, and the tiling.
 - **Holonomy:** one lap around a {5,4} tile turns a transported frame by π/2 to within 1e-9; the room-to-room transport gives ±72° per pillar, and 360° around a tile.
 - **Phase Escape:**
@@ -118,7 +118,7 @@ docs/          MATH.md, HARDWARE.md, DEMO.md, screenshots
   - The tutorial's order of tips, and the high-score ranking.
 - **4D maths:** B₄⁺, rotations, the tesseract, and plank shadows (one solution per rift, smear grows with distance from it).
 - **Rifts:** they block until bridged, bridge from your 4D view (or settle when you're close and let go), only from nearby, and the solver can require them. BOOT tap vs hold.
-- **Controller:** the protocol parser, run against a real 2 s recording from the controller.
+- **Controller:** the USB line parser, run against a real 2 s recording from the controller; the Bluetooth packet decoder, and a check that a Bluetooth sample drives the controls exactly as the same sample over USB.
 
 ## Screenshots
 
