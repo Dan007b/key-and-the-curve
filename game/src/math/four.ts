@@ -19,10 +19,12 @@ export const PLANES: Record<Plane, [number, number]> = {
   zw: [2, 3],
 };
 
+/** The 4×4 identity: the key's starting orientation. */
 export function identity4(): Mat4 {
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 }
 
+/** Matrix product a·b. */
 export function mul4(a: readonly number[], b: readonly number[]): Mat4 {
   const out = new Array<number>(16);
   for (let r = 0; r < 4; r++) {
@@ -35,12 +37,14 @@ export function mul4(a: readonly number[], b: readonly number[]): Mat4 {
   return out;
 }
 
+/** Transpose; for a rotation this is also the inverse. */
 export function transpose4(m: readonly number[]): Mat4 {
   const out = new Array<number>(16);
   for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) out[c * 4 + r] = m[r * 4 + c];
   return out;
 }
 
+/** Matrix-vector product m·v. */
 export function apply4(m: readonly number[], v: Readonly<Vec4>): Vec4 {
   const out: Vec4 = [0, 0, 0, 0];
   for (let r = 0; r < 4; r++) out[r] = m[r * 4] * v[0] + m[r * 4 + 1] * v[1] + m[r * 4 + 2] * v[2] + m[r * 4 + 3] * v[3];

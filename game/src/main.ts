@@ -357,7 +357,55 @@ function tick(now: number): void {
   requestAnimationFrame(tick);
 }
 
+/**
+ * ?scene=… sets up a showcase state (used for the README screenshots):
+ * title, gate (level 2 mid-twist), loop (level 3 just after a pillar lap),
+ * final (level 5 at its first gate).
+ */
+function setupScene(scene: string): void {
+  const drive = (rooms: number[]) => {
+    const pilot = new Autopilot(game, waypoints(game, rooms));
+    for (let t = 0; t < 60 && !pilot.done(); t += 1 / 60) {
+      game.update(1 / 60, pilot);
+      pilot.update();
+    }
+  };
+  const twistBy = (rates: [number, number, number], seconds: number) => {
+    const pilot = new Autopilot(game);
+    pilot.rates = rates;
+    pilot.toggleRequested = true;
+    for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60, pilot);
+  };
+  const begin = (index: number) => {
+    startLevel(index);
+    hud.hideCard();
+    paused = false;
+  };
+  if (scene === 'title') begin(0);
+  if (scene === 'gate') {
+    begin(1);
+    drive([0, 4]);
+    twistBy([Math.PI / 2, 0, 0], 0.6);
+  }
+  if (scene === 'loop') {
+    ahaShown = true;
+    begin(2);
+    drive([0, 4, 18, 5, 0]);
+    handleEvents();
+  }
+  if (scene === 'final') {
+    begin(4);
+    drive([0, 4, 14, 3, 10]);
+  }
+}
+
 startLevel(0);
+const scene = new URLSearchParams(location.search).get('scene');
+if (scene) {
+  // Showcase shots are often taken headless with a software renderer, whose FPS is meaningless.
+  document.body.classList.add('scene');
+  setupScene(scene);
+}
 requestAnimationFrame(tick);
 
 if (import.meta.env.DEV) {

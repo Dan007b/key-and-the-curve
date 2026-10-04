@@ -314,3 +314,14 @@ Implement `lorentz.ts`, `poincare.ts`, and `geodesic.ts` with unit tests for:
 - Never hardcode hardware details Danny hasn't confirmed.
 - Keyboard mode must keep working after every phase.
 - If something in this spec turns out to be wrong or impractical, say so and propose a fix rather than silently diverging.
+
+## 12. Implementation notes (decisions made during the build)
+
+These supersede the parts of sections 6–8 they mention. Details and reasoning are in `docs/MATH.md` and the README's "Changes from the original brief".
+
+- **Key transport is discrete.** The key's frame is carried along geodesics between room centres (`game/src/game/transport.ts`), not in the marble's continuous frame: the marble's own path area is too noisy for gate tolerances. Loops therefore turn the key by exact multiples of 72° (one per enclosed pillar, the area of a dual {4,5} square), not "90° per tile lap". A post at every maze vertex keeps the pillar winding well defined. Holonomy is measured against reference frames carried along the maze's spanning tree.
+- **The key is marked.** B₄⁺ contains every 90° plane rotation, so the symmetric fit would make 90° targets trivial. The key has axis-coloured edges and one marked corner, and the fit is ‖K_eff − target‖_F with no symmetry. `hyperoctahedralGroup()` and the B₄⁺ tests remain.
+- **Twist mode is a toggle** (Space or the BOOT button), owned by the game. `InputSource.trigger()` became `twistToggled()`.
+- **View frame** = carried room frame translated to the marble, with a short eased offset hiding the ≤18° jump at room boundaries. Physics still runs in the marble's continuous frame M.
+- **Levels** were designed with measured loop holonomies; `tests/levels.test.ts` has a state-space solver and autopilot playthroughs (`game/src/game/autopilot.ts`). Run them after any level edit. Tile indices are stable as long as `WORLD_RADIUS` and the generation order are unchanged.
+- **Dev hooks** (dev server only): `__start(i)`, `__teleport(room)`, `__drive([rooms])`, `__advance(s)`, `__bench(n)`, `__demo()`. `?scene=title|gate|loop|final` sets up the README screenshots (capture with headless Chrome).

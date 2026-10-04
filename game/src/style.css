@@ -398,3 +398,7 @@ canvas {
     grid-column: 1;
   }
 }
+
+.scene .hud-fps {
+  visibility: hidden;
+}
