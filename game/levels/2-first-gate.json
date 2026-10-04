@@ -1,0 +1,12 @@
+{
+  "name": "First gate",
+  "tiling": [5, 4],
+  "depth": 2,
+  "seed": 2,
+  "extraOpenings": 0,
+  "start": 0,
+  "goal": 10,
+  "gates": [{ "tile": 4, "edge": 4, "target": [["xw", 90]] }],
+  "intro": "The magenta gate opens only for a key in the right orientation. Press Space (or the controller's BOOT button) to enter twist mode, then turn the key through the fourth dimension: Q and A turn it in the XW plane, or twist the controller. Match the ghost in the corner and the gate snaps open.",
+  "hint": "Space: twist mode. Q/A turn the XW plane. Match the ghost."
+}

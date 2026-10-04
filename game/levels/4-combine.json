@@ -1,0 +1,14 @@
+{
+  "name": "Combine",
+  "tiling": [5, 4],
+  "depth": 3,
+  "seed": 3,
+  "extraOpenings": 2,
+  "open": [[4, 14]],
+  "start": 0,
+  "goal": 3,
+  "gates": [{ "tile": 43, "edge": 4, "target": [["yw", 90], ["xy", 72]] }],
+  "markedPillars": [[4, 0]],
+  "intro": "This gate needs both: a 4D twist in the YW plane (W and S in twist mode), and a 72° turn from curvature, the other way round this time. Which way around a pillar turns the key which way?",
+  "hint": "Twist YW 90° and loop clockwise around a pillar, in either order."
+}

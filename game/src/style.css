@@ -1,0 +1,228 @@
+:root {
+  --bg: #05060a;
+  --panel: rgba(12, 16, 28, 0.82);
+  --line: #2a3654;
+  --text: #dfe7ff;
+  --muted: #8d9cc2;
+  --accent: #7fe7ff;
+  --twist: #c08cff;
+  --gate: #ff4fd8;
+  --good: #4dffa0;
+  --gold: #ffcc4d;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud-left {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  max-width: min(360px, 40vw);
+}
+
+.hud-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.hud-hint {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.hud-right {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  text-align: right;
+  font: 12px ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.hud-status .ok {
+  color: var(--good);
+}
+
+.hud-status .off {
+  color: var(--muted);
+}
+
+.hud-mode {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  border: 1px solid var(--line);
+}
+
+.hud-mode.roll {
+  color: var(--accent);
+}
+
+.hud-mode.twist {
+  color: #10061c;
+  background: var(--twist);
+  border-color: var(--twist);
+}
+
+.hud-holonomy {
+  color: var(--text);
+}
+
+.hud-fit {
+  position: absolute;
+  right: 18px;
+  bottom: 300px;
+  width: 260px;
+  font: 12px ui-monospace, Consolas, monospace;
+  color: var(--muted);
+}
+
+.hud-fit-track {
+  position: relative;
+  margin-top: 4px;
+  height: 8px;
+  border-radius: 4px;
+  background: #1a2238;
+  overflow: hidden;
+}
+
+.hud-fit-bar {
+  height: 100%;
+  width: 0;
+  background: var(--gate);
+  transition: width 80ms linear;
+}
+
+.hud-fit-bar.good {
+  background: var(--good);
+}
+
+.hud-fit-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+  opacity: 0.7;
+}
+
+.hud-buttons {
+  position: absolute;
+  left: 18px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.hud-button,
+.card-button {
+  font: 600 12px 'Inter', system-ui, sans-serif;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.hud-button:hover,
+.card-button:hover {
+  border-color: var(--accent);
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 4, 8, 0.55);
+  padding: 16px;
+}
+
+.card {
+  max-width: 520px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 22px 26px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.card h1 {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+
+.card p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #c3cdea;
+}
+
+.card .formula {
+  font: 15px 'Cambria Math', 'STIX Two Math', serif;
+  color: var(--gold);
+  text-align: center;
+  margin: 12px 0;
+}
+
+.card-button {
+  margin-top: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  border-color: var(--accent);
+}
+
+@media (max-width: 700px) {
+  .hud-left {
+    max-width: 60vw;
+  }
+  .hud-fit {
+    bottom: 220px;
+    width: 180px;
+  }
+}

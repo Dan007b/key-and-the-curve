@@ -1,0 +1,11 @@
+{
+  "name": "Rolling",
+  "tiling": [5, 4],
+  "depth": 2,
+  "seed": 1,
+  "extraOpenings": 0,
+  "start": 0,
+  "goal": 13,
+  "intro": "Tilt to roll the marble: arrow keys, WASD, drag with the mouse, or tilt the controller. Find the golden room. Rooms shrink toward the rim because hyperbolic space grows exponentially outward: there is always more room just ahead.",
+  "hint": "Roll to the golden room."
+}

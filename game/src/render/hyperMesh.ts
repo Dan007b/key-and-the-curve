@@ -23,11 +23,12 @@ attribute vec3 iRow0;
 attribute vec3 iRow1;
 attribute vec3 iRow2;
 attribute vec4 iColor;
+attribute float aFade;
 varying vec4 vColor;
 void main() {
   vec3 p = vec3(dot(iRow0, position), dot(iRow1, position), dot(iRow2, position));
   vec2 d = p.xy / (1.0 + p.z);
-  vColor = iColor;
+  vColor = vec4(iColor.rgb, iColor.a * aFade);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(d, 0.0, 1.0);
 }
 `;
@@ -43,6 +44,8 @@ void main() {
 export interface HyperShape {
   positions: number[];
   indices: number[];
+  /** Optional per-vertex opacity (1 = full), e.g. to feather a glow band. */
+  fade?: number[];
 }
 
 export type Blend = 'opaque' | 'alpha' | 'additive';
@@ -60,6 +63,8 @@ export class HyperMesh {
     this.capacity = capacity;
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(shape.positions, 3));
+    const vertexCount = shape.positions.length / 3;
+    g.setAttribute('aFade', new THREE.Float32BufferAttribute(shape.fade ?? new Array(vertexCount).fill(1), 1));
     g.setIndex(shape.indices);
     const mk = (size: number) => {
       const a = new THREE.InstancedBufferAttribute(new Float32Array(capacity * size), size);
@@ -200,3 +205,35 @@ export function hyperRing(r0: number, r1: number, segments: number): HyperShape 
   return { positions, indices };
 }
 
+
+/**
+ * Like geodesicBand, but with a centre line at full opacity fading to zero at
+ * the edges: a soft glow that keeps its true hyperbolic width.
+ */
+export function softGeodesicBand(a: ReadonlyVec3, b: ReadonlyVec3, w: number, samples: number, extend = 0): HyperShape {
+  const n = geodesicNormal(a, b);
+  const len = distance(a, b);
+  const ch = Math.cosh(w);
+  const sh = Math.sinh(w);
+  const positions: number[] = [];
+  const fade: number[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = (-extend + (i / samples) * (len + 2 * extend)) / len;
+    const c = geodesicPoint(a, b, t);
+    // Ends fade out too, so overlapping glows at corners blend smoothly.
+    const s = i / samples;
+    const endFade = Math.min(1, Math.min(s, 1 - s) * 6);
+    pushPoint(positions, [ch * c[0] + sh * n[0], ch * c[1] + sh * n[1], ch * c[2] + sh * n[2]]);
+    pushPoint(positions, c);
+    pushPoint(positions, [ch * c[0] - sh * n[0], ch * c[1] - sh * n[1], ch * c[2] - sh * n[2]]);
+    fade.push(0, endFade, 0);
+  }
+  const indices: number[] = [];
+  for (let i = 0; i < samples; i++) {
+    const r = 3 * i;
+    for (const k of [0, 1]) {
+      indices.push(r + k, r + k + 1, r + k + 3, r + k + 1, r + k + 4, r + k + 3);
+    }
+  }
+  return { positions, indices, fade };
+}

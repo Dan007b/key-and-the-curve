@@ -1,0 +1,15 @@
+{
+  "name": "Curvature turns the key",
+  "tiling": [5, 4],
+  "depth": 2,
+  "seed": 1,
+  "extraOpenings": 0,
+  "open": [[0, 5]],
+  "start": 0,
+  "goal": 13,
+  "twist": false,
+  "gates": [{ "tile": 5, "edge": 3, "target": [["xy", -72]] }],
+  "markedPillars": [[0, 4]],
+  "intro": "Twisting is disabled here. The gate wants the key turned 72° clockwise, and only the curvature of space can do it. Roll once counter-clockwise around the glowing pillar, then return to the gate.",
+  "hint": "Loop counter-clockwise around the glowing pillar, then go to the gate."
+}

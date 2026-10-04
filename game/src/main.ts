@@ -1,9 +1,13 @@
-// Entry point. Phase 3: fly a frame around the {5,4} tiling with the keyboard.
+// Entry point: wires the game, the views, the HUD and the inputs together.
 
-import { identity, lorentzInverse, mul, reorthonormalize, translation } from './math/lorentz';
-import { generateTiling } from './math/tiling';
+import './style.css';
+import { lorentzInverse } from './math/lorentz';
 import { DiskView } from './render/diskView';
+import type { ViewState } from './render/diskView';
+import { Hud } from './render/hud';
 import { KeyboardInput } from './input/KeyboardInput';
+import { Game } from './game/game';
+import { LEVELS } from './game/level';
 
 const app = document.getElementById('app');
 if (!app) {
@@ -12,73 +16,113 @@ if (!app) {
 
 const canvas = document.createElement('canvas');
 app.appendChild(canvas);
-const fps = document.createElement('div');
-fps.className = 'fps';
-app.appendChild(fps);
-
 const view = new DiskView(canvas);
-const tiling = generateTiling({ p: 5, q: 4, maxRadius: 7.5 });
-const colors = new Float32Array(tiling.tiles.length * 3);
-tiling.tiles.forEach((t, i) => {
-  // Alternate shades by depth so the layered growth of the plane is visible.
-  const base = t.depth % 2 === 0 ? [0.16, 0.2, 0.32] : [0.11, 0.14, 0.24];
-  colors.set(i === 0 ? [0.35, 0.3, 0.12] : base, i * 3);
-});
-view.setTiling(tiling, colors);
+const hud = new Hud(app);
+const keyboard = new KeyboardInput(canvas, () => view.diskRadiusPx);
+const game = new Game();
 
-const input = new KeyboardInput(canvas, () => view.diskRadiusPx);
+let levelIndex = 0;
+let paused = true;
+
+function startLevel(index: number): void {
+  levelIndex = index;
+  const spec = LEVELS[index];
+  game.load(spec);
+  view.setLevel(game.level.world, spec, game.settings.marble.radius);
+  hud.setLevel(index, spec.name, spec.hint);
+  paused = true;
+  hud.showCard(`Level ${index + 1} · ${spec.name}`, spec.intro, 'Start', () => {
+    paused = false;
+  });
+}
+
+hud.button('Restart', 'Restart this level', () => startLevel(levelIndex));
+hud.button('Next level', 'Skip to the next level', () => startLevel((levelIndex + 1) % LEVELS.length));
 
 const resize = () => view.resize(window.innerWidth, window.innerHeight);
 window.addEventListener('resize', resize);
 resize();
 
-let frame = identity();
-const SPEED = 1.5; // hyperbolic units per second at full tilt
-
-/** Advances the simulation by dt seconds. */
-function step(dt: number) {
-  input.update(dt);
-  const { x, y } = input.tilt();
-  // Move in the frame's own local direction: parallel transport (CLAUDE.md §6.3).
-  frame = reorthonormalize(mul(frame, translation(x * SPEED * dt, y * SPEED * dt)));
+function viewState(): ViewState {
+  return {
+    time: game.time,
+    twistMode: game.twistMode,
+    gateGlow: [],
+    gateOpen: [],
+    highlightPosts: new Set(),
+  };
 }
 
-function draw() {
-  view.render(lorentzInverse(frame));
+function draw(): void {
+  view.render(lorentzInverse(game.viewFrame()), viewState());
+}
+
+function step(dt: number): void {
+  keyboard.update(dt);
+  keyboard.twistMode = game.twistMode;
+  if (paused) return;
+  game.update(dt, keyboard);
+  if (game.completed) {
+    paused = true;
+    const last = levelIndex === LEVELS.length - 1;
+    hud.showCard(
+      last ? 'You made it home' : 'Level complete',
+      last ? 'You carried the key through curved space and four dimensions.' : 'On to the next one.',
+      last ? 'Play again' : 'Next level',
+      () => startLevel(last ? 0 : levelIndex + 1),
+    );
+  }
 }
 
 let last = performance.now();
 let frames = 0;
 let fpsTime = last;
-function tick(now: number) {
-  step(Math.min(0.05, (now - last) / 1000));
+let fps = 60;
+function tick(now: number): void {
+  step(Math.min(0.1, (now - last) / 1000));
   last = now;
   draw();
   frames++;
   if (now - fpsTime > 500) {
-    fps.textContent = `${Math.round((frames * 1000) / (now - fpsTime))} FPS`;
+    fps = (frames * 1000) / (now - fpsTime);
     frames = 0;
     fpsTime = now;
   }
+  hud.update({
+    fps,
+    inputs: [keyboard.status()],
+    twistMode: game.twistMode,
+    twistAllowed: game.twistAllowed(),
+    holonomyDeg: (game.holonomy() * 180) / Math.PI,
+    fit: null,
+    fitThreshold: 0,
+  });
   requestAnimationFrame(tick);
 }
+
+startLevel(0);
 requestAnimationFrame(tick);
 
 if (import.meta.env.DEV) {
+  // Dev hooks for testing in a hidden tab, where requestAnimationFrame is paused.
   Object.assign(window, {
-    /** Mean ms per frame over n renders from moving viewpoints (GPU flushed). */
-    __bench(n = 200) {
-      const t0 = performance.now();
-      for (let i = 0; i < n; i++) {
-        view.render(lorentzInverse(mul(frame, translation(Math.cos(i) * 2, Math.sin(i) * 2))));
-      }
-      view.renderer.getContext().finish();
-      return (performance.now() - t0) / n;
+    __game: game,
+    __start(index: number) {
+      startLevel(index);
+      hud.hideCard();
+      paused = false;
     },
-    /** Advances the simulation by `seconds` in 60 Hz steps and redraws (works while the tab is hidden). */
+    /** Advances the simulation by `seconds` in 60 Hz steps and redraws. */
     __advance(seconds: number) {
       for (let t = 0; t < seconds; t += 1 / 60) step(1 / 60);
       draw();
+    },
+    /** Mean ms per frame over n renders (GPU flushed). */
+    __bench(n = 200) {
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) draw();
+      view.renderer.getContext().finish();
+      return (performance.now() - t0) / n;
     },
   });
 }
