@@ -185,6 +185,23 @@ export function fitDistance(k: readonly number[], target: readonly number[], sym
   return best;
 }
 
+/**
+ * The twist angle θ in one plane that brings K closest to `target`, i.e. the
+ * θ minimising ‖R_plane(θ)·K − target‖_F. Used to tell the player which way
+ * to turn, and how far.
+ *
+ * ‖R K − T‖² = const − 2·tr(Tᵀ R K) = const − 2·tr(R·M) with M = K·Tᵀ, and
+ * for a rotation in plane (i, j): tr(R·M) = rest + cos θ·(M_ii + M_jj)
+ * + sin θ·(M_ij − M_ji). That is maximised at θ = atan2(M_ij − M_ji, M_ii + M_jj).
+ * If the remaining mismatch is a pure rotation in this plane, θ is exactly it.
+ */
+export function bestTwistAngle(k: readonly number[], target: readonly number[], plane: Plane): number {
+  const [i, j] = PLANES[plane];
+  // Only four entries of M = K·Tᵀ are needed: M_ab = Σ_c K_ac·T_bc.
+  const m = (a: number, b: number) => k[a * 4] * target[b * 4] + k[a * 4 + 1] * target[b * 4 + 1] + k[a * 4 + 2] * target[b * 4 + 2] + k[a * 4 + 3] * target[b * 4 + 3];
+  return Math.atan2(m(i, j) - m(j, i), m(i, i) + m(j, j));
+}
+
 /** Fit distance of a single-plane rotation by `angle` from the identity: 2√2·|sin(angle/2)|. */
 export function planeAngleToFit(angle: number): number {
   return 2 * Math.SQRT2 * Math.abs(Math.sin(angle / 2));

@@ -1,10 +1,12 @@
 /**
  * Heads-up display: plain DOM over the canvas (crisp text, no GPU cost).
  * Level title and hint, FPS, input status, ROLL/TWIST mode, the key's
- * holonomy, the gate fit meter, buttons and overlay cards.
+ * holonomy, the gate lock panel, buttons and overlay cards.
  */
 
 import type { InputStatus } from '../input/InputSource';
+import { LockPanel } from './lockPanel';
+import type { LockView } from './lockPanel';
 
 export interface HudState {
   fps: number;
@@ -13,9 +15,8 @@ export interface HudState {
   twistAllowed: boolean;
   /** Key holonomy in degrees, relative to the direct route. */
   holonomyDeg: number;
-  /** 0..1 closeness of the nearest gate, or null if no gate is near. */
-  fit: number | null;
-  fitThreshold: number;
+  /** The nearest gate's lock, or null if no gate is near. */
+  lock: LockView | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, parent: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -35,9 +36,8 @@ export class Hud {
   private readonly status: HTMLDivElement;
   private readonly mode: HTMLDivElement;
   private readonly holonomy: HTMLDivElement;
-  private readonly fitBox: HTMLDivElement;
-  private readonly fitBar: HTMLDivElement;
-  private readonly fitMark: HTMLDivElement;
+  private lockPanel!: LockPanel;
+  private readonly insetHint: HTMLDivElement;
   private readonly overlay: HTMLDivElement;
   private readonly inset: HTMLDivElement;
   private readonly toast: HTMLDivElement;
@@ -54,14 +54,10 @@ export class Hud {
     this.status = el('div', 'hud-status', right);
     this.mode = el('div', 'hud-mode', right);
     this.holonomy = el('div', 'hud-holonomy', right);
-    this.fitBox = el('div', 'hud-fit', this.root);
-    el('div', 'hud-fit-label', this.fitBox, 'Key fit');
-    const track = el('div', 'hud-fit-track', this.fitBox);
-    this.fitBar = el('div', 'hud-fit-bar', track);
-    this.fitMark = el('div', 'hud-fit-mark', track);
     this.buttons = el('div', 'hud-buttons', this.root);
     this.inset = el('div', 'hud-inset', this.root);
     el('div', 'hud-inset-label', this.inset, '4D key');
+    this.insetHint = el('div', 'inset-hint', this.inset);
     const legend = el('div', 'hud-inset-legend', this.inset);
     for (const [axis, cls] of [['x', 'ax-x'], ['y', 'ax-y'], ['z', 'ax-z'], ['w', 'ax-w']]) el('span', cls, legend, axis);
     el('span', 'ax-bit', legend, '● bit');
@@ -123,14 +119,13 @@ export class Hud {
     this.mode.className = `hud-mode ${s.twistMode ? 'twist' : 'roll'}`;
     const h = Math.round(s.holonomyDeg);
     this.holonomy.textContent = `Curvature has turned the key ${h > 0 ? '+' : ''}${h}°`;
-    if (s.fit === null) {
-      this.fitBox.classList.add('hidden');
-    } else {
-      this.fitBox.classList.remove('hidden');
-      this.fitBar.style.width = `${Math.round(s.fit * 100)}%`;
-      this.fitBar.classList.toggle('good', s.fit >= s.fitThreshold);
-      this.fitMark.style.left = `${Math.round(s.fitThreshold * 100)}%`;
-    }
+    this.lockPanel?.update(s.lock);
+    this.insetHint.textContent = s.lock ? 'halo = what the lock needs\nline: bit → its slot' : '';
+  }
+
+  /** Creates the gate lock panel; `onHelp` opens the explanation. */
+  createLockPanel(onHelp: () => void): void {
+    this.lockPanel = new LockPanel(this.root, onHelp);
   }
 
   /** Shows a centred card with a title, body text and one action (also Enter). */

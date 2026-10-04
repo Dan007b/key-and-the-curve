@@ -95,16 +95,31 @@ export class KeyView {
   // The key: thin bright lines. The ghost: a wide translucent halo behind them.
   private readonly key = new Tesseract(2.5, 1, false);
   private readonly ghost = new Tesseract(9, 0.32, true);
+  /** Dashed line from the key's bit to where the lock wants it. */
+  private readonly bitLine: THREE.Line;
 
   constructor() {
-    this.scene.add(this.ghost.lines, this.ghost.bead, this.key.lines, this.key.bead);
+    this.bitLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.8 }),
+    );
+    this.scene.add(this.ghost.lines, this.ghost.bead, this.key.lines, this.key.bead, this.bitLine);
   }
 
   /** Updates the drawn key and (optionally) the ghost target, both in the local frame. */
   update(key: Mat4, ghost: Mat4 | null, time: number): void {
     this.key.update(key, false);
     this.ghost.setVisible(ghost !== null);
-    if (ghost) this.ghost.update(ghost, true);
+    this.bitLine.visible = ghost !== null;
+    if (ghost) {
+      this.ghost.update(ghost, true);
+      const pos = this.bitLine.geometry.attributes.position as THREE.BufferAttribute;
+      pos.setXYZ(0, this.key.bead.position.x, this.key.bead.position.y, this.key.bead.position.z);
+      pos.setXYZ(1, this.ghost.bead.position.x, this.ghost.bead.position.y, this.ghost.bead.position.z);
+      pos.needsUpdate = true;
+      this.bitLine.computeLineDistances();
+      this.bitLine.geometry.computeBoundingSphere();
+    }
     // A gentle sway of the 3D camera helps the eye read depth.
     const a = 0.45 + 0.18 * Math.sin(time * 0.4);
     this.camera.position.set(Math.sin(a) * 6.2, 2.3, Math.cos(a) * 6.2);

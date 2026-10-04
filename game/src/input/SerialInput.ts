@@ -11,7 +11,7 @@
  */
 
 import type { InputSource, InputStatus } from './InputSource';
-import { DEFAULT_TILT, DEFAULT_TWIST_MAPPING, LineSplitter, mapTwist, parseLine, tiltFromGravity } from './serialProtocol';
+import { DEFAULT_TILT, DEFAULT_TWIST_MAPPING, LineSplitter, dominantTwist, mapTwist, parseLine, tiltFromGravity } from './serialProtocol';
 import type { Sample, TiltSettings, TwistMapping } from './serialProtocol';
 
 /** Must match kBaud in firmware/src/main.cpp. */
@@ -35,6 +35,9 @@ const USB_VENDORS = [0x10c4, 0x1a86, 0x0403, 0x303a];
 export class SerialInput implements InputSource {
   tiltSettings: TiltSettings = { ...DEFAULT_TILT };
   twistMapping: TwistMapping = { ...DEFAULT_TWIST_MAPPING };
+  /** Twist one plane at a time (the strongest wrist axis wins). */
+  onePlaneAtATime = true;
+  private activePlane = -1;
   /** Called with every '#' line from the board (for a debug console). */
   onDebugLine: ((line: string) => void) | null = null;
 
@@ -137,7 +140,16 @@ export class SerialInput implements InputSource {
 
   angularVelocity(): [number, number, number] {
     if (!this.latest) return [0, 0, 0];
-    return mapTwist(this.latest.gyro, this.twistMapping);
+    const rates = mapTwist(this.latest.gyro, this.twistMapping);
+    if (!this.onePlaneAtATime) return rates;
+    const d = dominantTwist(rates, this.activePlane);
+    this.activePlane = d.active;
+    return d.rates;
+  }
+
+  /** The twist plane the controller is currently driving (0 = XW, 1 = YW, 2 = ZW), or −1. */
+  activeTwistPlane(): number {
+    return this.activePlane;
   }
 
   twistToggled(): boolean {

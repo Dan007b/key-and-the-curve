@@ -7,6 +7,6 @@
   "start": 0,
   "goal": 10,
   "gates": [{ "tile": 4, "edge": 4, "target": [["xw", 90]] }],
-  "intro": "The magenta gate opens only for a key in the right orientation. Press Space (or the controller's BOOT button) to enter twist mode, then turn the key through the fourth dimension: Q and A turn it in the XW plane, or twist the controller. Match the ghost in the corner and the gate snaps open.",
-  "hint": "Space: twist mode. Q/A turn the XW plane. Match the ghost."
+  "intro": "The magenta gate is a lock, and your key is the tesseract in the corner. Roll up to the gate and the lock panel shows what it needs. Press Space (or the controller's BOOT button) for twist mode, then turn the key through the fourth dimension: hold Q until the XW dial points straight up. Get close and let go, and the key slides in.",
+  "hint": "At the gate: Space for twist mode, then hold Q until the XW dial points up."
 }

@@ -129,7 +129,13 @@ where θ is the holonomy (§7) measured on the gate's side, and R_xy rotates the
 
   d = ‖K_eff − target‖_F.
 
-For a single-plane mismatch of angle α, d = 2√2·|sin(α/2)|. The gate starts glowing within 2τ, and within τ = 0.35 (about 14°) the key glides onto the exact orientation and the gate opens.
+For a single-plane mismatch of angle α, d = 2√2·|sin(α/2)|. The gate starts glowing within 2τ, and within τ = 0.35 (about 14°) the key glides onto the exact orientation and the gate opens. If the player gets within 2τ and stops twisting, the key also drifts the rest of the way (the settle assist).
+
+**Telling the player which way to turn.** Every gate target is written as twists in the W planes followed by a turn in XY, so the lock splits into four dials: curvature (XY) and the XW, YW, ZW twists (`game/src/game/lock.ts`). For each twist plane, the best angle to turn has a closed form. ‖R(θ)·K − T‖² = const − 2·tr(R(θ)·M) with M = K·Tᵀ, and for a rotation in plane (i, j), tr(R(θ)·M) = rest + cos θ·(M_ii + M_jj) + sin θ·(M_ij − M_ji). So the best twist is
+
+  θ* = atan2(M_ij − M_ji, M_ii + M_jj),
+
+which is exactly the remaining angle when the mismatch lies in that plane. That is what each dial shows, and the panel highlights the plane with the most to go. For curvature, the dial shows the difference between the holonomy needed and the holonomy carried, in 72° laps.
 
 ## 9. Numerical care, in one table
 

@@ -128,3 +128,26 @@ export const DEFAULT_TWIST_MAPPING: TwistMapping = { axes: [0, 1, 2], signs: [1,
 export function mapTwist(gyro: V3, m: TwistMapping): V3 {
   return [0, 1, 2].map((i) => gyro[m.axes[i]] * m.signs[i]) as V3;
 }
+
+/**
+ * One plane at a time: keeps only the strongest of the three twist rates and
+ * zeroes the others, so an imperfect wrist rotation doesn't smear the key
+ * across all three planes. Rates below `deadband` (rad/s) are ignored, and the
+ * active plane only changes when another becomes `switchRatio` times
+ * stronger (hysteresis, so it doesn't flicker between two similar axes).
+ * Returns the filtered rates and the active plane index (−1 if none).
+ */
+export function dominantTwist(
+  rates: V3,
+  active: number,
+  deadband = 0.3,
+  switchRatio = 1.6,
+): { rates: V3; active: number } {
+  const mags = rates.map(Math.abs);
+  let best = mags.indexOf(Math.max(...mags));
+  if (mags[best] < deadband) return { rates: [0, 0, 0], active: -1 };
+  if (active !== -1 && active !== best && mags[active] >= deadband && mags[best] < switchRatio * mags[active]) best = active;
+  const out: V3 = [0, 0, 0];
+  out[best] = rates[best];
+  return { rates: out, active: best };
+}

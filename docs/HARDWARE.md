@@ -26,7 +26,7 @@ Everything connects to **one header**: the side with the 5V (or VIN) and GND pin
 
 ### The button
 
-There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the trigger. **Press once to enter 4D twist mode, press again to leave it.** The firmware only reports whether BOOT is held (debounced, 20 ms); the game turns presses into the on/off toggle, so it can also switch twist mode off itself (for example on levels where twisting is disabled).
+There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the trigger. **Press once to enter 4D twist mode, press again to leave it.** In twist mode, rotating the controller turns the key one plane at a time: whichever wrist axis is rotating fastest wins, and small wobbles (under about 17°/s) are ignored. This can be switched off under Settings. The firmware only reports whether BOOT is held (debounced, 20 ms); the game turns presses into the on/off toggle, so it can also switch twist mode off itself (for example on levels where twisting is disabled).
 
 Don't hold BOOT while plugging the board in or pressing EN: GPIO0 is sampled at reset, and holding it low starts the bootloader instead of the firmware. Pressing it at any other time is safe.
 

@@ -46,7 +46,13 @@ Open http://localhost:5173 in Chrome or Edge (they have Web Serial, which the co
 | R | Reset the key (undo all twists) |
 | T · M · H | Trail on/off · sound on/off · help |
 
-The inset in the corner shows the key. Edges are coloured by axis (x red, y green, z blue, w gold) and one corner, the key's **bit**, is a white bead. Near a gate, the gate's target appears as a translucent ghost behind the key: when the colours and the bead line up, it fits, and the key snaps in. The fit meter shows how close you are.
+The inset in the corner shows the key. Edges are coloured by axis (x red, y green, z blue, w gold) and one corner, the key's **bit**, is a white bead.
+
+Each gate is a **4D lock with four dials**, shown in the lock panel above the key when you reach a gate:
+- **Curvature:** only rolling around pillars changes it. The panel says how many laps, and which way.
+- **XW, YW, ZW:** the twist planes. Each dial says how far to turn and which key to hold, for example "turn +48° · hold Q".
+
+When every dial points straight up, the key matches the gate's ghost (the translucent halo behind it, with a dashed line from the bit to its slot) and the gate opens. Get close and let go: the key slides in by itself. The **?** on the lock panel explains it all with pictures. It also appears automatically at your first gate.
 
 **Watch demo** plays level 3 by itself: it rolls straight to the gate (no fit), loops the glowing pillar, and comes back with the key turned.
 
@@ -115,7 +121,7 @@ cd game
 npm test
 ```
 
-108 tests, including:
+118 tests, including:
 - **Geometry:** Lorentz inverse, invariance of distances, re-orthonormalisation, the disk staying strictly inside the unit circle, Klein straightness, wall segment tests, and the tiling's neighbour structure.
 - **Holonomy:** one lap around a {5,4} tile turns a transported frame by π/2 to within 1e-9, and regular polygons of every shape match −area.
 - **The game's transport:** ±72° per pillar by orientation, 360° around a whole tile, and exact results after 5,000 random steps.

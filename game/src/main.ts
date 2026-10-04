@@ -14,6 +14,7 @@ import { CombinedInput } from './input/CombinedInput';
 import { FIT_SCALE, Game } from './game/game';
 import { LEVELS } from './game/level';
 import { Sound } from './audio';
+import { lockExplainer } from './render/explainer';
 import { Autopilot, shortestRoute, waypoints } from './game/autopilot';
 import { identity4 } from './math/four';
 import { loadSettings, saveSettings, settingsForm } from './settings';
@@ -33,6 +34,7 @@ const serial = new SerialInput();
 const input = new CombinedInput(keyboard, serial);
 const game = new Game();
 const keyView = new KeyView();
+hud.createLockPanel(() => showLockExplainer());
 const sound = new Sound();
 const INSET_MARGIN = 16;
 let insetSize = 240;
@@ -46,6 +48,9 @@ const loopPillars = new Map<number, number>();
 /** Whether the level 3 explanation has been shown this session. */
 let ahaShown = false;
 let wasTwisting = false;
+/** One-time teaching moments this session. */
+let lockExplained = false;
+let twistHinted = false;
 
 // ---- Demo: level 3 plays itself --------------------------------------------------
 
@@ -107,6 +112,8 @@ function applySettings(s: Settings): void {
   serial.tiltSettings = { fullTiltDeg: s.fullTiltDeg, deadzone: s.deadzone, invertX: s.invertX, invertY: s.invertY, swapXY: s.swapXY };
   serial.twistMapping = { axes: [...s.twistAxes], signs: s.twistInvert.map((inv) => (inv ? -1 : 1)) as [number, number, number] };
   sound.enabled = s.sound;
+  game.settings.assist = s.assist;
+  serial.onePlaneAtATime = s.onePlane;
   saveSettings(s);
 }
 applySettings(settings);
@@ -146,6 +153,20 @@ function showLevels(): void {
     grid.appendChild(b);
   });
   pauseWith('Levels', '', 'Close', grid);
+}
+
+/** What the 4D key is, what a twist does, and why matching opens the gate. */
+function showLockExplainer(): void {
+  lockExplained = true;
+  pauseWith(
+    'How the 4D lock works',
+    'Your key is a tesseract, a cube in four dimensions. The corner view shows its 3D shadow, the way a cube casts a 2D shadow. The big outer cube is the side of the key nearest you in the fourth direction (w), the small inner cube is the far side, and the gold edges run along w.\n' +
+      'In 4D, things turn in a plane rather than around an axis. A twist in the XW plane turns the x direction (red) into the w direction (gold), so the inner and outer cubes swap places along x. YW and ZW do the same for y and z.\n' +
+      'Each gate is a 4D lock with four dials. Three are the twist planes you control: Q/A, W/S and E/D, or twist the controller. The fourth is curvature, which only rolling around pillars can change. When every dial points straight up, the key matches the ghost and the gate opens. Get close and let go: the key settles in by itself.',
+    'Got it',
+    lockExplainer(),
+    true,
+  );
 }
 
 function showHelp(): void {
@@ -291,6 +312,10 @@ function handleEvents(): void {
   }
   if (game.twistMode !== wasTwisting) {
     sound.twist(game.twistMode);
+    if (game.twistMode && !twistHinted) {
+      twistHinted = true;
+      hud.flash('TWIST · follow the highlighted dial');
+    }
     wasTwisting = game.twistMode;
   }
   for (const _ of game.openedEvents.splice(0)) {
@@ -316,6 +341,8 @@ function step(dt: number): void {
   game.update(dt, demoInput(dt) ?? input);
   input.vibrate(game.gateGlow());
   handleEvents();
+  // The first time a gate is in reach, explain the 4D lock.
+  if (game.gateReading && !lockExplained && !demo && !paused) showLockExplainer();
   if (game.completed) {
     paused = true;
     sound.complete();
@@ -351,8 +378,16 @@ function tick(now: number): void {
     twistMode: game.twistMode,
     twistAllowed: game.twistAllowed(),
     holonomyDeg: ((game.gateReading?.holonomy ?? game.holonomy()) * 180) / Math.PI,
-    fit: game.gateReading ? Math.max(0, 1 - game.gateReading.distance / FIT_SCALE) : null,
-    fitThreshold: 1 - game.settings.tolerance / FIT_SCALE,
+    lock: game.gateReading
+      ? {
+          status: game.gateReading.lock,
+          fit: Math.max(0, 1 - game.gateReading.distance / FIT_SCALE),
+          threshold: 1 - game.settings.tolerance / FIT_SCALE,
+          twistMode: game.twistMode,
+          twistAllowed: game.twistAllowed(),
+          controllerConnected: serial.connected(),
+        }
+      : null,
   });
   requestAnimationFrame(tick);
 }
@@ -363,6 +398,9 @@ function tick(now: number): void {
  * final (level 5 at its first gate).
  */
 function setupScene(scene: string): void {
+  // Showcase states skip the one-time teaching cards.
+  lockExplained = true;
+  twistHinted = true;
   const drive = (rooms: number[]) => {
     const pilot = new Autopilot(game, waypoints(game, rooms));
     for (let t = 0; t < 60 && !pilot.done(); t += 1 / 60) {

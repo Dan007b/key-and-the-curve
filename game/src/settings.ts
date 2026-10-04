@@ -23,6 +23,10 @@ export interface Settings {
   twistInvert: [boolean, boolean, boolean];
   trail: boolean;
   sound: boolean;
+  /** Let the key settle into a gate when close and released. */
+  assist: boolean;
+  /** Controller twists one plane at a time (strongest wrist axis). */
+  onePlane: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -37,6 +41,8 @@ export const DEFAULT_SETTINGS: Settings = {
   twistInvert: [false, false, false],
   trail: true,
   sound: true,
+  assist: true,
+  onePlane: true,
 };
 
 const STORAGE_KEY = 'key-and-the-curve.settings.v1';
@@ -149,10 +155,12 @@ export function settingsForm(initial: Settings, onChange: (s: Settings) => void)
     wrap.append(select, inv, invLabel);
     row(`${plane} plane`, wrap);
   });
+  checkbox('One plane at a time (strongest wrist axis wins)', () => s.onePlane, (v) => (s.onePlane = v));
 
   section('Game');
   slider('Rolling friction', 0.2, 3, 0.05, () => s.damping, (v) => (s.damping = v), (v) => `${v.toFixed(2)} /s`);
   slider('Gate tolerance τ', 0.15, 0.6, 0.01, () => s.tolerance, (v) => (s.tolerance = v), (v) => `${v.toFixed(2)} (≈${Math.round((2 * Math.asin(v / (2 * Math.SQRT2)) * 180) / Math.PI)}°)`);
+  checkbox('Settle assist (key slides in when close)', () => s.assist, (v) => (s.assist = v));
   checkbox('Holonomy trail (T)', () => s.trail, (v) => (s.trail = v));
   checkbox('Sound (M)', () => s.sound, (v) => (s.sound = v));
   return form;

@@ -402,3 +402,173 @@ canvas {
 .scene .hud-fps {
   visibility: hidden;
 }
+
+/* ---- Gate lock panel (above the key inset) ---------------------------------- */
+
+.lock-panel {
+  position: absolute;
+  right: var(--inset-margin, 16px);
+  bottom: calc(var(--inset-size, 240px) + var(--inset-margin, 16px) + 10px);
+  width: max(var(--inset-size, 240px), 250px);
+  box-sizing: border-box;
+  padding: 8px 10px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  pointer-events: auto;
+}
+
+.lock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font: 600 11px 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.lock-count {
+  margin-left: auto;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.lock-help {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: #11172a;
+  color: var(--accent);
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.lock-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 4px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+}
+
+.lock-row[data-state='next'] {
+  border-color: var(--accent);
+  background: rgba(127, 231, 255, 0.07);
+}
+
+.lock-row[data-state='set'] {
+  opacity: 0.55;
+}
+
+.lock-row[data-state='set'] .lock-hint {
+  color: var(--good);
+}
+
+.lock-dial {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.dial-face {
+  fill: #0b1020;
+  stroke: #33426a;
+  stroke-width: 1.5;
+}
+
+.lock-row[data-state='set'] .dial-face {
+  stroke: var(--good);
+}
+
+.dial-notch {
+  fill: var(--text);
+}
+
+.dial-needle line {
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.dial-needle {
+  transition: transform 90ms linear;
+}
+
+.lock-text {
+  min-width: 0;
+}
+
+.lock-name {
+  font: 600 12px 'Inter', system-ui, sans-serif;
+}
+
+.lock-hint {
+  font: 11px ui-monospace, Consolas, monospace;
+  color: var(--muted);
+}
+
+.lock-row[data-state='next'] .lock-hint {
+  color: var(--accent);
+}
+
+.lock-track {
+  position: relative;
+  margin-top: 7px;
+  height: 6px;
+  border-radius: 3px;
+  background: #1a2238;
+  overflow: hidden;
+}
+
+.lock-bar {
+  height: 100%;
+  width: 0;
+  background: var(--gate);
+  transition: width 80ms linear;
+}
+
+.lock-bar.good {
+  background: var(--good);
+}
+
+.lock-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+  opacity: 0.7;
+}
+
+.inset-hint {
+  white-space: pre-line;
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  font: 10px 'Inter', system-ui, sans-serif;
+  color: var(--muted);
+  text-align: right;
+}
+
+.explainer-figure {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 6px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.explainer-figure svg {
+  width: 100%;
+  height: auto;
+  background: #0a0e1a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}

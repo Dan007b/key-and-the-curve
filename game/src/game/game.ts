@@ -17,6 +17,8 @@ import type { InputSource } from '../input/InputSource';
 import { approach, fitDistance, frobenius, identity4, mul4, planeRotation, rotationFromList, twistStep } from '../math/four';
 import type { Mat4 } from '../math/four';
 import type { GateSpec } from './level';
+import { analyzeLock } from './lock';
+import type { LockStatus } from './lock';
 import { toKlein } from '../math/poincare';
 import type { Vec3 } from '../math/lorentz';
 
@@ -31,15 +33,25 @@ export interface GameSettings {
   marble: MarbleParams;
   /** Gate tolerance τ on the Frobenius fit distance (CLAUDE.md §6.7). */
   tolerance: number;
+  /**
+   * Settle assist: within 2τ of a fit, if the player stops twisting, the key
+   * drifts gently into place. Exact twisting to within ~14° is hard by hand.
+   */
+  assist: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
   marble: { ...DEFAULT_MARBLE },
   tolerance: 0.35,
+  assist: true,
 };
 
 /** Time constant of the snap into a gate once within τ, s. */
 const SNAP_TIME = 0.08;
+/** Time constant of the settle assist inside 2τ, s. */
+const SETTLE_TIME = 0.45;
+/** Twist rates below this (rad/s) count as "not twisting" for the settle assist. */
+const SETTLE_IDLE = 0.15;
 /** Fit distances are shown relative to this: 2 is a 90° single-plane turn. */
 export const FIT_SCALE = 2;
 
@@ -96,6 +108,8 @@ export interface GateReading {
   distance: number;
   /** The target expressed in the marble's local frame (what the ghost shows). */
   ghost: Mat4;
+  /** Per-tumbler guidance (see lock.ts). */
+  lock: LockStatus;
 }
 
 export class Game {
@@ -226,7 +240,12 @@ export class Game {
     const holonomy = this.holonomy(gate.spec.tile);
     const ghost = mul4(planeRotation('xy', -holonomy), gate.target);
     const d = fitDistance(this.effectiveKey(holonomy), gate.target);
-    this.gateReading = { index, holonomy, distance: d, ghost };
+    this.gateReading = { index, holonomy, distance: d, ghost, lock: analyzeLock(this.key, holonomy, gate.spec) };
+    const idle = !this.twistMode || Math.hypot(rates[0], rates[1], rates[2]) < SETTLE_IDLE;
+    if (this.settings.assist && idle && d < 2 * this.settings.tolerance && d >= this.settings.tolerance) {
+      // Close, and the player has let go: drift into place.
+      this.key = approach(this.key, ghost, 1 - Math.exp(-dt / SETTLE_TIME));
+    }
     if (d < this.settings.tolerance) {
       // Within τ: glide onto the exact fit, then open.
       this.key = approach(this.key, ghost, 1 - Math.exp(-dt / SNAP_TIME));
