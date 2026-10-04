@@ -6,6 +6,7 @@ import type { InputSource } from '../src/input/InputSource';
 import { Autopilot, shortestRoute, waypoints } from '../src/game/autopilot';
 import { LAYERS, mod } from '../src/game/phase';
 import type { Vec3 } from '../src/math/lorentz';
+import type { SolverStep } from '../src/game/solver';
 
 export { shortestRoute, waypoints };
 
@@ -88,5 +89,27 @@ export function playLevel(game: Game): boolean {
     }
     if (targets.length > 50) return false;
   }
+  return game.status === 'won';
+}
+
+/**
+ * Plays a solver solution with the real physics: rolls room to room through
+ * each shared edge's midpoint, and on a twist step phases, then re-centres in
+ * the room (shards are picked up near the centre). True if the level is won.
+ */
+export function followSolution(game: Game, steps: SolverStep[]): boolean {
+  const { tiles } = game.level.tiling;
+  for (const step of steps) {
+    if ('twistTo' in step) {
+      phaseTo(game, step.twistTo);
+      if (game.layer !== step.twistTo) return false;
+      if (drive(game, [tiles[game.room].center]) === Infinity) return false;
+    } else {
+      if (drive(game, routeWaypoints(game, [game.room, step.room])) === Infinity) return false;
+      if (game.status === 'won') return true;
+      if (game.room !== step.room) return false;
+    }
+  }
+  idle(game, 1);
   return game.status === 'won';
 }

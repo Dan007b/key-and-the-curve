@@ -15,7 +15,10 @@ import level1 from '../../levels/1-slip.json';
 import level2 from '../../levels/2-hunted.json';
 import level3 from '../../levels/3-curvature.json';
 import level4 from '../../levels/4-swarm.json';
-import level5 from '../../levels/5-escape.json';
+import level5 from '../../levels/5-shifter.json';
+import level6 from '../../levels/6-orbit.json';
+import level7 from '../../levels/7-flux.json';
+import level8 from '../../levels/8-escape.json';
 
 export interface ShardSpec {
   tile: number;
@@ -26,7 +29,12 @@ export interface ShardSpec {
 export interface HunterSpec {
   /** Spawn room. */
   tile: number;
+  /** The layer it starts in. */
   layer: number;
+  /** Shifters only: seconds between layer changes. */
+  shiftEvery?: number;
+  /** Shifters only: layers moved per change (default +1). */
+  shiftStep?: number;
 }
 
 export interface LevelSpec {
@@ -57,7 +65,7 @@ export interface LevelSpec {
   hint: string;
 }
 
-export const LEVELS: LevelSpec[] = [level1, level2, level3, level4, level5] as LevelSpec[];
+export const LEVELS: LevelSpec[] = [level1, level2, level3, level4, level5, level6, level7, level8] as LevelSpec[];
 
 /** Generation radius for every level's tiling. Fixed so tile indices never change. */
 export const WORLD_RADIUS = 7.5;

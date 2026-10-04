@@ -205,6 +205,25 @@ export function hyperRing(r0: number, r1: number, segments: number): HyperShape 
   return { positions, indices };
 }
 
+/** A dashed hyperbolic annulus: `dashes` arcs between radii r0 < r1, each filling `duty` of its slot. */
+export function dashedRing(r0: number, r1: number, dashes: number, duty: number, segmentsPerDash: number): HyperShape {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let d = 0; d < dashes; d++) {
+    const base = positions.length / 3;
+    for (let i = 0; i <= segmentsPerDash; i++) {
+      const a = ((d + (duty * i) / segmentsPerDash) * 2 * Math.PI) / dashes;
+      const c = Math.cos(a), s = Math.sin(a);
+      pushPoint(positions, expOrigin(r0 * c, r0 * s));
+      pushPoint(positions, expOrigin(r1 * c, r1 * s));
+    }
+    for (let i = 0; i < segmentsPerDash; i++) {
+      const a0 = base + 2 * i;
+      indices.push(a0, a0 + 1, a0 + 2, a0 + 1, a0 + 3, a0 + 2);
+    }
+  }
+  return { positions, indices };
+}
 
 /**
  * Like geodesicBand, but with a centre line at full opacity fading to zero at

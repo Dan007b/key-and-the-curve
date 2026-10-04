@@ -329,4 +329,10 @@ These supersede the parts of sections 6–8 they mention. Details and reasoning 
 
 ## 13. Phase Escape redesign (supersedes the key/gate gameplay)
 
-The game is now **Phase Escape** (see README and `HANDOFF.md`): collect shards, reach the portal, three lives, hunters. The 4th dimension is five colour layers (72° each); doors/shards/hunters live in one layer; layer = (twist steps + holonomy steps) mod 5, so one pillar lap = one layer. Inputs: `InputSource.phaseSteps()` / `phaseRate()` (Q/E/Space, BOOT, controller yaw about the level vertical). The tesseract is now a decorative "4D body" turned in XW by your phase. Gates, the lock panel and tesseract matching were removed. Levels in `game/levels/*-slip|hunted|curvature|swarm|escape.json`; solvability and autopilot tests in `tests/levels.test.ts`.
+The game is now **Phase Escape** (see README and `HANDOFF.md`): collect shards, reach the portal, three lives, hunters. The 4th dimension is five colour layers (72° each); doors/shards/hunters live in one layer; layer = (twist steps + holonomy steps) mod 5, so one pillar lap = one layer. Inputs: `InputSource.phaseSteps()` / `phaseRate()` (Q/E/Space, BOOT, controller yaw about the level vertical). The tesseract is now a decorative "4D body" turned in XW by your phase. Gates, the lock panel and tesseract matching were removed. Levels in `game/levels/*-slip|hunted|curvature|swarm|shifter|orbit|flux|escape.json` (8 levels); solvability and autopilot tests in `tests/levels.test.ts`.
+
+Additions after the redesign (see HANDOFF.md):
+- **Solver** (`game/src/game/solver.ts`): BFS over (room, holonomy step, twist step, shards held); `solveLevelPath` returns the route, which `tests/bot.ts` `followSolution` plays with real physics for every level.
+- **Generator** (`game/src/game/generator.ts`, recipes in `recipes.ts`): levels 5–7 are generated; edit the recipe, run `npm run levels`, never hand-edit those JSON files (a test checks they match). Escape moved to `8-escape.json`.
+- **Shifters**: `HunterSpec.shiftEvery` / `shiftStep`; layer = (base + step·⌊t/every⌋) mod 5, 1.5 s warning (`SHIFT_WARNING`).
+- **Tutorial** (`game/src/game/tutorial.ts`, level 1 only), **high scores** (`game/src/scores.ts`, localStorage, top 5 per level by stars then time), **music** (`game/src/music.ts`, one chord per layer, builds with danger; N toggles).

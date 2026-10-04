@@ -6,9 +6,11 @@ import { Game, LIVES } from '../src/game/game';
 import { LEVELS, loadLevel } from '../src/game/level';
 import type { LevelSpec } from '../src/game/level';
 import { passageKey } from '../src/game/maze';
-import { LAYERS, holonomySteps, layerOf, mod } from '../src/game/phase';
-import { angleBetween, carryAcross } from '../src/game/transport';
-import { drive, idle, phaseTo, playLevel, routeWaypoints } from './bot';
+import { solveLevel, solveLevelPath } from '../src/game/solver';
+import { LAYERS, holonomySteps, layerOf } from '../src/game/phase';
+import { scheduledLayer } from '../src/game/hunter';
+import { makeRng } from '../src/game/random';
+import { drive, followSolution, idle, phaseTo, playLevel, routeWaypoints } from './bot';
 
 const STEP = (72 * Math.PI) / 180;
 
@@ -23,45 +25,9 @@ describe('phase layers', () => {
   });
 });
 
-/**
- * Breadth-first search over (room, curvature step, twist step, shards held).
- * Doors pass only in their own layer; shards are taken only in their layer;
- * crossing a passage changes the curvature step by its holonomy jump. Twist
- * steps are free if the level allows twisting. Ignores hunters.
- */
+/** Whether a level can be finished (ignoring hunters), optionally using only some passages. */
 function solvable(spec: LevelSpec, passable?: Set<number>): boolean {
-  const { tiling, maze, world, references } = loadLevel(spec);
-  const allowed = passable ?? maze.open;
-  const twist = spec.twist !== false;
-  const jump = (a: number, b: number) => Math.round(angleBetween(references[b]!, carryAcross(tiling, references[a]!, a, b)) / STEP);
-  const full = (1 << spec.shards.length) - 1;
-  const take = (room: number, layer: number, held: number) =>
-    spec.shards.reduce((h, s, i) => (s.tile === room && s.layer === layer ? h | (1 << i) : h), held);
-  const key = (r: number, c: number, t: number, h: number) => `${r}|${c}|${t}|${h}`;
-  const start: [number, number, number, number] = [spec.start, 0, 0, take(spec.start, 0, 0)];
-  const seen = new Set([key(...start)]);
-  const queue = [start];
-  for (let i = 0; i < queue.length; i++) {
-    const [room, c, t, held] = queue[i];
-    if (room === spec.exit && held === full) return true;
-    const push = (r: number, c2: number, t2: number) => {
-      const h2 = take(r, mod(c2 + t2, LAYERS), held);
-      const k = key(r, c2, t2, h2);
-      if (!seen.has(k)) {
-        seen.add(k);
-        queue.push([r, c2, t2, h2]);
-      }
-    };
-    if (twist) for (let d = 1; d < LAYERS; d++) push(room, c, mod(t + d, LAYERS));
-    const layer = mod(c + t, LAYERS);
-    for (const n of tiling.tiles[room].neighbors) {
-      if (n === -1 || !maze.isRoom[n] || !allowed.has(passageKey(room, n))) continue;
-      const id = world.wallOn(room, tiling.tiles[room].neighbors.indexOf(n));
-      if (id !== -1 && world.walls[id].door !== layer) continue;
-      push(n, mod(c + jump(room, n), LAYERS), t);
-    }
-  }
-  return false;
+  return solveLevel(loadLevel(spec), { passable }) !== -1;
 }
 
 describe('levels', () => {
@@ -73,6 +39,14 @@ describe('levels', () => {
     const spec = LEVELS[2];
     expect(spec.twist).toBe(false);
     expect(solvable(spec, loadLevel(spec).maze.tree)).toBe(false);
+  });
+
+  it('every level that jams twisting needs loops, and every level needs its doors', () => {
+    for (const spec of LEVELS) {
+      const level = loadLevel(spec);
+      if (spec.twist === false) expect(solvable(spec, level.maze.tree), spec.name).toBe(false);
+      expect(solveLevel(level, { doorsSolid: true }), spec.name).toBe(-1);
+    }
   });
 
   it('every level has doors that need more than one colour', () => {
@@ -156,6 +130,21 @@ describe('rules', () => {
     expect(hunter.position[2]).toBeLessThan(d0);
   });
 
+  it('hunters survive you phasing in and out of their layer mid-chase (regression: stale patrol target)', () => {
+    const rand = makeRng(7);
+    for (const spec of LEVELS.filter((l) => l.hunters.length > 0)) {
+      for (let run = 0; run < 2; run++) {
+        const game = new Game();
+        game.load(spec);
+        for (let k = 0; k < 15; k++) {
+          phaseTo(game, Math.floor(rand() * LAYERS));
+          idle(game, 0.3 + rand() * 2.5);
+          game.lives = LIVES; // keep playing
+        }
+      }
+    }
+  }, 60_000);
+
   it('looping a pillar shifts you one layer (level 3)', () => {
     const game = new Game();
     game.load(LEVELS[2]);
@@ -167,7 +156,61 @@ describe('rules', () => {
   });
 });
 
+describe('shifting hunters', () => {
+  it('follow a fixed timetable round the five layers, either way', () => {
+    expect(scheduledLayer(2, null, 100)).toBe(2);
+    expect(scheduledLayer(2, { every: 8, step: 1 }, 7.9)).toBe(2);
+    expect(scheduledLayer(2, { every: 8, step: 1 }, 8)).toBe(3);
+    expect(scheduledLayer(2, { every: 8, step: 1 }, 8 * 4)).toBe(1); // 2 → 3 → 4 → 0 → 1
+    expect(scheduledLayer(1, { every: 7, step: -1 }, 7 * 2)).toBe(4); // 1 → 0 → 4
+  });
+
+  it('change layer in the game, warn first, and only hit you in the layer they are in now', () => {
+    const game = new Game();
+    const spec = LEVELS.find((l) => l.hunters.some((h) => h.shiftEvery))!;
+    game.load(spec);
+    const shifter = game.hunters.find((h) => h.shift)!;
+    const every = shifter.shift!.every;
+    const start = shifter.layer;
+    // Stay out of every hunter's way: park all of them at their spawns each frame.
+    const hold = () => game.hunters.forEach((h) => h.respawn());
+    for (let t = 0; t < every - 1; t += 1 / 60) {
+      game.update(1 / 60, { tilt: () => ({ x: 0, y: 0 }), phaseSteps: () => 0, phaseRate: () => 0, status: () => ({ label: 'bot', connected: true }) });
+      hold();
+    }
+    expect(shifter.layer).toBe(start);
+    expect(shifter.aboutToShift()).toBe(true);
+    expect(shifter.nextLayer).toBe((start + shifter.shift!.step + LAYERS) % LAYERS);
+    idle(game, 1.1);
+    expect(shifter.layer).toBe(shifter.nextLayer === start ? start : (start + shifter.shift!.step + LAYERS) % LAYERS);
+    expect(game.shiftEvents.some((e) => e.to === shifter.layer)).toBe(true);
+    // In its old layer it is a ghost; in its new one it hits.
+    const now = shifter.layer;
+    hold();
+    phaseTo(game, start);
+    shifter.position = game.marble.position();
+    shifter.room = game.room;
+    idle(game, 0.05);
+    expect(game.lives).toBe(LIVES);
+    phaseTo(game, now);
+    shifter.position = game.marble.position();
+    shifter.room = game.room;
+    idle(game, 0.05);
+    expect(game.lives).toBe(LIVES - 1);
+  });
+});
+
 describe('autopilot playthroughs (real physics)', () => {
+  it('every level, following the solver, hunters removed', () => {
+    for (const spec of LEVELS) {
+      const calm = { ...spec, hunters: [] };
+      const steps = solveLevelPath(loadLevel(calm))!;
+      const game = new Game();
+      game.load(calm);
+      expect(followSolution(game, steps), spec.name).toBe(true);
+    }
+  });
+
   it('level 1: collect both shards through coloured doors, then the portal', () => {
     const game = new Game();
     game.load(LEVELS[0]);

@@ -13,9 +13,15 @@ import { SerialInput } from './input/SerialInput';
 import { CombinedInput } from './input/CombinedInput';
 import { Game, LIVES } from './game/game';
 import { LEVELS } from './game/level';
-import { LAYER_CSS, LAYER_NAMES, LAYER_RGB, holonomySteps } from './game/phase';
+import { LAYERS, LAYER_CSS, LAYER_NAMES, LAYER_RGB, holonomySteps, mod } from './game/phase';
 import { Autopilot, waypoints } from './game/autopilot';
+import { roomDistances } from './game/maze';
 import { Sound } from './audio';
+import { Music } from './music';
+import { SHIFT_WARNING } from './game/hunter';
+import { Tutorial } from './game/tutorial';
+import { TABLE_SIZE, formatTime, insertRun, loadPlayerName, loadScores, rankOf, savePlayerName, saveScores, starsFor } from './scores';
+import type { ScoreEntry } from './scores';
 import { loadSettings, saveSettings, settingsForm } from './settings';
 import type { Settings } from './settings';
 
@@ -34,6 +40,7 @@ const input = new CombinedInput(keyboard, serial);
 const game = new Game();
 const keyView = new KeyView();
 const sound = new Sound();
+const music = new Music();
 const INSET_MARGIN = 16;
 let insetSize = 240;
 let settings = loadSettings();
@@ -41,6 +48,8 @@ let settings = loadSettings();
 let levelIndex = 0;
 let paused = true;
 let markedPosts = new Set<number>();
+/** Level 1's tutorial tips (null on other levels, or when turned off). */
+let tutorial: Tutorial | null = null;
 /** Pillars to pulse after a loop closes, with the game time their highlight ends. */
 const loopPillars = new Map<number, number>();
 /** One-time explanation of curvature phasing (this session). */
@@ -54,6 +63,7 @@ function applySettings(s: Settings): void {
   serial.phaseGain = s.phaseGain;
   serial.phaseInvert = s.phaseInvert;
   sound.enabled = s.sound;
+  music.configure(s.sound && s.music, s.musicVolume);
   saveSettings(s);
 }
 applySettings(settings);
@@ -67,6 +77,8 @@ function startLevel(index: number, showIntro = true): void {
   loopPillars.clear();
   hud.clearLabels();
   hud.setLevel(index, spec.name, spec.hint);
+  tutorial = index === 0 && settings.tutorial ? new Tutorial() : null;
+  hud.setTip(null);
   paused = true;
   if (showIntro) {
     hud.showCard(`Level ${index + 1} · ${spec.name}`, spec.intro, 'Start', () => {
@@ -87,14 +99,89 @@ function pauseWith(title: string, body: string, action: string, extra?: HTMLElem
 function showLevels(): void {
   const grid = document.createElement('div');
   grid.className = 'level-grid';
+  const book = loadScores();
   LEVELS.forEach((spec, i) => {
     const b = document.createElement('button');
     b.className = 'hud-button';
-    b.textContent = `${i + 1} · ${spec.name}`;
+    const best = book[spec.name]?.[0];
+    const name = document.createElement('span');
+    name.textContent = `${i + 1} · ${spec.name}`;
+    const record = document.createElement('span');
+    record.className = best ? 'level-best' : 'level-best none';
+    record.textContent = best ? `${stars(best.stars)} ${formatTime(best.time)}` : 'not finished yet';
+    b.append(name, record);
     b.addEventListener('click', () => startLevel(i));
     grid.appendChild(b);
   });
-  pauseWith('Levels', '', 'Close', grid);
+  pauseWith('Levels', '', 'Close', grid, true);
+}
+
+/** ★★☆ */
+function stars(n: number): string {
+  return '★'.repeat(n) + '☆'.repeat(3 - n);
+}
+
+/**
+ * A level's top runs as a table. If `entry` is given and makes the table, it
+ * is shown at its rank with a name box, which is handed to `nameBox`.
+ */
+function scoreTable(levelName: string, entry: ScoreEntry | null, nameBox?: (input: HTMLInputElement) => void): HTMLElement {
+  const table = document.createElement('table');
+  table.className = 'score-table';
+  const head = table.createTHead().insertRow();
+  for (const h of ['#', 'Name', 'Time', 'Stars', 'Lives']) head.insertCell().textContent = h;
+  const body = table.createTBody();
+  const runs = loadScores()[levelName] ?? [];
+  const rank = entry ? rankOf(runs, entry) : -1;
+  const rows = rank === -1 ? runs : insertRun(runs, entry!);
+  rows.forEach((run, i) => {
+    const tr = body.insertRow();
+    if (i === rank) tr.className = 'new';
+    tr.insertCell().textContent = String(i + 1);
+    const nameCell = tr.insertCell();
+    if (i === rank && nameBox) {
+      const input = document.createElement('input');
+      input.maxLength = 14;
+      input.placeholder = 'Your name';
+      input.value = run.name;
+      input.className = 'score-name';
+      nameCell.appendChild(input);
+      nameBox(input);
+    } else {
+      nameCell.textContent = run.name;
+    }
+    tr.insertCell().textContent = formatTime(run.time);
+    tr.insertCell().textContent = stars(run.stars);
+    tr.insertCell().textContent = String(run.lives);
+  });
+  if (rows.length === 0) {
+    const cell = body.insertRow().insertCell();
+    cell.colSpan = 5;
+    cell.className = 'empty';
+    cell.textContent = 'No runs yet.';
+  }
+  return table;
+}
+
+function showScores(): void {
+  const wrap = document.createElement('div');
+  wrap.className = 'score-book';
+  LEVELS.forEach((spec, i) => {
+    const h = document.createElement('h2');
+    h.textContent = `${i + 1} · ${spec.name}`;
+    wrap.append(h, scoreTable(spec.name, null));
+  });
+  const clear = document.createElement('button');
+  clear.className = 'hud-button';
+  clear.textContent = 'Clear all scores';
+  clear.addEventListener('click', () => {
+    if (!window.confirm('Delete every saved score in this browser?')) return;
+    saveScores({});
+    hud.closeCard();
+    showScores();
+  });
+  wrap.appendChild(clear);
+  pauseWith('High scores', `Your ${TABLE_SIZE} best runs of each level, saved in this browser. Ranked by stars, then time.`, 'Close', wrap, true);
 }
 
 function showHelp(): void {
@@ -106,7 +193,7 @@ function showHelp(): void {
     ['Space', 'Phase up one layer'],
     ['Controller', 'Tilt to roll; turn it like a dial to phase; BOOT = phase up'],
     ['R', 'Restart the level'],
-    ['T · M · H', 'Trail · sound · this help'],
+    ['T · M · N · H', 'Trail · sound · music · this help'],
   ];
   for (const [k, v] of rows) {
     const tr = table.insertRow();
@@ -117,6 +204,7 @@ function showHelp(): void {
     'How to play',
     'Grab every shard ◆, then roll into the portal. Hunters take a life when they touch you; lose three and you are caught.\n' +
       'The maze has a fourth dimension: five layers, five colours. You exist in one at a time. Doors open only in their own colour, shards can only be grabbed in theirs, and hunters can only see and touch you in theirs. Phase to slip through doors and away from hunters.\n' +
+      'Shifters are hunters that change colour every few seconds: the dashed ring around one is the colour it moves into next, and it flickers just before it goes.\n' +
       'Space is curved here. Roll once around a pillar and you come back one layer over (clockwise = up, counter-clockwise = down): the curvature itself moves you through the fourth dimension.',
     'Close',
     table,
@@ -215,12 +303,19 @@ if (SerialInput.supported()) {
 }
 hud.button('Watch demo', 'Level 3 plays itself: curvature moves you through the fourth dimension', startDemo);
 hud.button('Levels', 'Choose a level', showLevels);
-hud.button('Settings', 'Controller feel, friction, trail, sound', showSettings);
+hud.button('Scores', 'Your best runs of each level', showScores);
+hud.button('Settings', 'Controller feel, friction, trail, sound and music', showSettings);
 hud.button('Help (H)', 'How to play', showHelp);
 hud.button('Restart (R)', 'Restart this level', () => startLevel(levelIndex));
 
-window.addEventListener('keydown', (e) => {
+/** Audio may only start after a user gesture; the music shares the effects' context. */
+function unlockAudio(): void {
   sound.unlock();
+  music.attach(sound.context());
+}
+
+window.addEventListener('keydown', (e) => {
+  unlockAudio();
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
   if (demo && !hud.cardVisible()) {
@@ -232,8 +327,9 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR' && !hud.cardVisible()) startLevel(levelIndex);
   if (e.code === 'KeyT') applySettings({ ...settings, trail: !settings.trail });
   if (e.code === 'KeyM') applySettings({ ...settings, sound: !settings.sound });
+  if (e.code === 'KeyN') applySettings({ ...settings, music: !settings.music });
 });
-window.addEventListener('pointerdown', () => sound.unlock());
+window.addEventListener('pointerdown', unlockAudio);
 
 const resize = () => {
   view.resize(window.innerWidth, window.innerHeight);
@@ -256,7 +352,14 @@ function viewState(): ViewState {
     time: game.time,
     layer: game.layer,
     shards: game.shards.map((s) => ({ position: tiles[s.spec.tile].center, layer: s.spec.layer, collected: s.collected })),
-    hunters: game.hunters.map((h) => ({ position: h.position, layer: h.layer, chasing: h.chasing })),
+    hunters: game.hunters.map((h) => ({
+      position: h.position,
+      layer: h.layer,
+      chasing: h.chasing,
+      shifter: h.shift !== null,
+      nextLayer: h.nextLayer,
+      warning: h.aboutToShift() ? 1 - h.shiftIn / SHIFT_WARNING : 0,
+    })),
     exit: { position: tiles[game.level.spec.exit].center, open: game.exitOpen() },
     invulnerable: game.invulnerable,
     highlightPosts: highlight,
@@ -269,10 +372,12 @@ function draw(): void {
   view.render(viewInverse, viewState());
   keyView.update(game.phaseDeg(), LAYER_RGB[game.layer], performance.now() / 1000);
   keyView.render(view.renderer, window.innerWidth - insetSize - INSET_MARGIN, INSET_MARGIN, insetSize);
-  hud.updateLabels((anchor) => {
+  const locate = (anchor: unknown) => {
     const [x, y] = toPoincare(apply(viewInverse, anchor as Vec3));
     return view.diskToScreen(x, y);
-  });
+  };
+  hud.updateLabels(locate);
+  hud.updateTip(locate);
 }
 
 /** Turns game events into sound, labels and overlays. */
@@ -306,6 +411,11 @@ function handleEvents(): void {
       hud.flash(`SHARD · ${game.shards.length - game.shardsLeft()}/${game.shards.length}`, '#ffffff');
     }
   }
+  for (const e of game.shiftEvents.splice(0)) {
+    if (e.to !== game.layer) continue;
+    sound.alarm();
+    hud.flash(`A HUNTER SHIFTED INTO ${LAYER_NAMES[e.to].toUpperCase()}`, LAYER_CSS[e.to]);
+  }
   if (game.hitEvents > 0) {
     game.hitEvents = 0;
     sound.hurt();
@@ -315,25 +425,21 @@ function handleEvents(): void {
 
 function step(dt: number): void {
   input.update(dt);
+  music.setMood({ layer: game.layer, danger: paused ? 0 : game.danger(), active: !paused });
   if (paused) return;
   game.update(dt, demoInput() ?? input);
   input.vibrate(game.danger());
   handleEvents();
+  if (tutorial && !demo) {
+    const tip = tutorial.update(game);
+    hud.setTip(tip?.text ?? null, tip && tip.layer !== null ? LAYER_CSS[tip.layer] : undefined, tip?.anchor ?? null);
+  }
   if (game.status === 'won') {
     paused = true;
+    const watched = demo !== null;
     demo = null;
     sound.complete();
-    const t = Math.round(game.time);
-    const par = game.level.spec.par;
-    const stars = game.lives === LIVES && t <= par ? 3 : t <= par * 1.5 ? 2 : 1;
-    const last = levelIndex === LEVELS.length - 1;
-    hud.showCard(
-      last ? 'You escaped' : 'Level complete',
-      `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}   ${t} s (par ${par} s) · ${game.lives}/${LIVES} lives\n` +
-        (last ? 'You outran the hunters through five dimensions of curved space.' : ''),
-      last ? 'Play again' : 'Next level',
-      () => startLevel(last ? 0 : levelIndex + 1),
-    );
+    showWin(watched);
   } else if (game.status === 'lost') {
     paused = true;
     demo = null;
@@ -343,6 +449,40 @@ function step(dt: number): void {
       if (!hud.cardVisible()) paused = false;
     }, 0);
   }
+}
+
+/** The level-complete card: stars, time, and the high-score table (with a name box if the run made it). */
+function showWin(watched: boolean): void {
+  const spec = game.level.spec;
+  const time = Math.round(game.time * 10) / 10;
+  const n = starsFor(time, game.lives, LIVES, spec.par);
+  const last = levelIndex === LEVELS.length - 1;
+  const entry: ScoreEntry = { name: loadPlayerName() || 'Player', time, lives: game.lives, stars: n, date: new Date().toLocaleDateString('en-CA') };
+  // Demo runs don't count; a real run that makes the table gets a name box.
+  const ranked = !watched && rankOf(loadScores()[spec.name] ?? [], entry) !== -1;
+  let nameInput: HTMLInputElement | null = null;
+  const table = watched ? undefined : scoreTable(spec.name, ranked ? entry : null, (input) => (nameInput = input));
+  hud.showCard(
+    last ? 'You escaped' : 'Level complete',
+    `${stars(n)}   ${formatTime(time)} (par ${formatTime(spec.par)}) · ${game.lives}/${LIVES} lives\n` +
+      (ranked ? 'A new high score! Type your name, then press Enter.\n' : '') +
+      (last ? 'You outran the hunters through five dimensions of curved space.' : ''),
+    last ? 'Play again' : 'Next level',
+    () => {
+      if (ranked) {
+        const name = nameInput?.value.trim() || 'Player';
+        savePlayerName(name);
+        const book = loadScores();
+        book[spec.name] = insertRun(book[spec.name] ?? [], { ...entry, name });
+        saveScores(book);
+      }
+      startLevel(last ? 0 : levelIndex + 1);
+    },
+    table,
+  );
+  const box = nameInput as HTMLInputElement | null;
+  box?.focus();
+  box?.select();
 }
 
 let last = performance.now();
@@ -369,7 +509,7 @@ function tick(now: number): void {
     lives: game.lives,
     maxLives: LIVES,
     shards: game.shards.map((s) => ({ layer: s.spec.layer, collected: s.collected })),
-    hunterLayers: game.hunters.map((h) => h.layer),
+    hunters: game.hunters.map((h) => ({ layer: h.layer, shifter: h.shift !== null })),
     time: game.time,
     danger: game.danger(),
   });
@@ -379,8 +519,21 @@ function tick(now: number): void {
 /**
  * ?scene=… sets up a showcase state (used for the README screenshots):
  * title (level 1), doors (level 1 at a door), hunted (level 2 with a hunter
- * closing in), curvature (level 3 just after a pillar lap), final (level 5).
+ * closing in), curvature (level 3 just after a pillar lap), shifter (level 5,
+ * a shifter about to change colour), final (the last level).
  */
+/** Puts the marble at a room's centre, carried along the direct route (scenes and dev hooks). */
+function teleport(room: number): void {
+  const ref = game.level.references[room];
+  if (!ref) throw new Error(`room ${room} is not in the maze`);
+  game.marble.frame = [...ref] as Mat3;
+  game.marble.vel = [0, 0];
+  game.carry = [...ref] as Mat3;
+  game.room = room;
+  game.cameraOffset = 0;
+  game.rebuildColliders();
+}
+
 function setupScene(scene: string): void {
   ahaShown = true;
   const drive = (rooms: number[]) => {
@@ -409,8 +562,19 @@ function setupScene(scene: string): void {
     drive([0, 4, 18, 5, 0]);
     handleEvents();
   }
-  if (scene === 'final') {
+  if (scene === 'shifter') {
+    // Two rooms from the shifter, in the colour it is about to move into, just before it does.
     begin(4);
+    const shifter = game.hunters.find((h) => h.shift)!;
+    const near = roomDistances(game.level.tiling, game.level.maze, shifter.spawn);
+    teleport([...near.keys()].find((r) => near.get(r) === 2)!);
+    // Phase straight away (out of the red hunter's sight), then wait for the warning.
+    const pilot = new Autopilot(game);
+    pilot.steps = mod(shifter.nextLayer - game.layer, LAYERS);
+    for (let t = 0; t < 10 && !(shifter.shiftIn <= 0.55 && shifter.shiftIn > 0.53); t += 1 / 60) game.update(1 / 60, pilot);
+  }
+  if (scene === 'final') {
+    begin(LEVELS.length - 1);
     drive([0, 4, 14, 3]);
   }
 }
@@ -428,6 +592,7 @@ if (import.meta.env.DEV) {
   // Dev hooks for testing in a hidden tab, where requestAnimationFrame is paused.
   Object.assign(window, {
     __game: game,
+    __music: music,
     __demo: startDemo,
     __start(index: number) {
       startLevel(index, false);
@@ -435,14 +600,7 @@ if (import.meta.env.DEV) {
     },
     /** Puts the marble at a room's centre, carried along the direct route. */
     __teleport(room: number) {
-      const ref = game.level.references[room];
-      if (!ref) throw new Error(`room ${room} is not in the maze`);
-      game.marble.frame = [...ref] as Mat3;
-      game.marble.vel = [0, 0];
-      game.carry = [...ref] as Mat3;
-      game.room = room;
-      game.cameraOffset = 0;
-      game.rebuildColliders();
+      teleport(room);
       draw();
     },
     /** Drives the marble through a room route with the autopilot (simulated time). */

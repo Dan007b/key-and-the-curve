@@ -1,0 +1,113 @@
+{
+  "name": "Orbit",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 3,
+  "seed": 34,
+  "extraOpenings": 0,
+  "start": 0,
+  "exit": 32,
+  "twist": false,
+  "doors": [
+    {
+      "tile": 4,
+      "edge": 4,
+      "layer": 2
+    },
+    {
+      "tile": 10,
+      "edge": 0,
+      "layer": 1
+    }
+  ],
+  "shards": [
+    {
+      "tile": 35,
+      "layer": 2
+    },
+    {
+      "tile": 33,
+      "layer": 3
+    },
+    {
+      "tile": 55,
+      "layer": 0
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 36,
+      "layer": 3
+    }
+  ],
+  "hunterSpeed": 0.45,
+  "par": 185,
+  "intro": "Twisting is jammed again, and the maze is bigger. Three glowing pillars each have a lap around them. Every clockwise lap takes you up one colour and every counter-clockwise lap takes you down one: only the curvature of space can change your colour here. Plan your laps.",
+  "hint": "Twist jammed. Lap a glowing pillar: clockwise = next colour, counter-clockwise = previous.",
+  "open": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      5
+    ],
+    [
+      1,
+      6
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      3,
+      13
+    ],
+    [
+      3,
+      15
+    ],
+    [
+      13,
+      40
+    ],
+    [
+      15,
+      40
+    ],
+    [
+      4,
+      16
+    ],
+    [
+      4,
+      17
+    ],
+    [
+      16,
+      50
+    ],
+    [
+      17,
+      50
+    ]
+  ],
+  "markedPillars": [
+    [
+      0,
+      0
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      4,
+      1
+    ]
+  ]
+}

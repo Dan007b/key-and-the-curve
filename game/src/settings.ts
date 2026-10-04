@@ -1,7 +1,7 @@
 /**
  * Player settings: controller tilt and phase-twist feel, rolling friction,
- * and a few toggles. Kept in this browser's localStorage as a convenience;
- * everything works without it.
+ * sound and music, and a few toggles. Kept in this browser's localStorage as
+ * a convenience; everything works without it.
  */
 
 import { DEFAULT_TILT } from './input/serialProtocol';
@@ -20,7 +20,13 @@ export interface Settings {
   /** Marble damping rate, 1/s. */
   damping: number;
   trail: boolean;
+  /** All sound (effects and music). */
   sound: boolean;
+  music: boolean;
+  /** Music volume, 0..1. */
+  musicVolume: number;
+  /** Tutorial tips on level 1. */
+  tutorial: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +40,9 @@ export const DEFAULT_SETTINGS: Settings = {
   damping: DEFAULT_MARBLE.damping,
   trail: true,
   sound: true,
+  music: true,
+  musicVolume: 0.5,
+  tutorial: true,
 };
 
 const STORAGE_KEY = 'phase-escape.settings.v1';
@@ -119,6 +128,9 @@ export function settingsForm(initial: Settings, onChange: (s: Settings) => void)
   section('Game');
   slider('Rolling friction', 0.2, 3, 0.05, () => s.damping, (v) => (s.damping = v), (v) => `${v.toFixed(2)} /s`);
   checkbox('Holonomy trail (T)', () => s.trail, (v) => (s.trail = v));
+  checkbox('Tutorial tips on level 1', () => s.tutorial, (v) => (s.tutorial = v));
   checkbox('Sound (M)', () => s.sound, (v) => (s.sound = v));
+  checkbox('Music (N)', () => s.music, (v) => (s.music = v));
+  slider('Music volume', 0, 1, 0.05, () => s.musicVolume, (v) => (s.musicVolume = v), (v) => `${Math.round(v * 100)}%`);
   return form;
 }

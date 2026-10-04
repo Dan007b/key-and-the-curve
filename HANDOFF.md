@@ -48,8 +48,22 @@ Danny's feedback: the tesseract-key matching is vague and too hard, there is no 
 - [x] Five levels (`levels/1-slip … 5-escape.json`) + 109 tests (solver, rules, autopilot playthroughs of levels 1 and 3)
 - [x] Docs/README/demo script/screenshots (scenes: title, doors, hunted, curvature, final), desktop rebuild (`desktop/out/Phase Escape-win32-x64/Phase Escape.exe`), pushed
 
+## Follow-up pass (all "next ideas" done)
+
+- [x] **Bug fix:** hunters crashed the frame loop (game froze) when you phased out of their layer after they had chased you across rooms: the stale patrol target was no longer a neighbour. Fixed in `hunter.ts`, with a fuzz regression test.
+- [x] **Solver** moved to `src/game/solver.ts`; `solveLevelPath` returns the route. Every level is now autopiloted along it with real physics (hunters removed), and every level is checked to need its doors.
+- [x] **Generator** (`src/game/generator.ts`, recipes in `src/game/recipes.ts`, `npm run levels` → `tools/generate-levels.mjs`): exit = farthest room, doors along the route (first never red, no two in a row the same colour), shards in dead ends (3+ colours), hunters in far rooms, optional pillar loops (all 4 passages round a pillar, marked). Kept only if solvable, impossible with doors shut, and (twist jammed) impossible on the tree. Test checks the JSON matches the recipes.
+- [x] **Three new levels:** 5 Shifter, 6 Orbit (twist jammed, three marked pillar loops), 7 Flux (two shifters, opposite directions). Escape is now level 8 (`8-escape.json`).
+- [x] **Shifting hunters:** `shiftEvery`/`shiftStep` in a level's hunter; deterministic timetable, 1.5 s flicker warning, dashed ring in the next colour, white-outlined dot on the phase ring, alarm + toast when one shifts into your layer, danger glow counts an incoming shifter.
+- [x] **Tutorial** on level 1 (`src/game/tutorial.ts`): contextual tips (roll → nearby door → nearby shard → portal) with a pulsing marker on the thing; toggle in Settings.
+- [x] **High scores** (`src/scores.ts`): top 5 per level (stars, then time, then lives) in localStorage, name entry on the win card, best run in the Levels menu, Scores panel with "Clear all scores". Demo runs don't count.
+- [x] **Music** (`src/music.ts`): live Web Audio, one chord per layer (A minor, F, C, G, E minor), arpeggio + bass, hi-hats/kick/faster arpeggio as a hunter in your layer closes in, quieter while a card is up. N toggles; volume in Settings.
+- [x] 124 tests; README, MATH.md §8, DEMO.md, CLAUDE.md §13, screenshots (new `?scene=shifter`), desktop app rebuilt (`desktop/out/Phase Escape-win32-x64`).
+
 ## Not yet verified / next ideas
 
-- Controller phasing (yaw dial + BOOT steps) not yet tried on the real board: check direction and the "turn needed per layer" setting; tilt direction may need invert/swap in Settings.
-- Old build folder `desktop/out/The Key and the Curve-win32-x64` can be deleted once that app is closed.
-- Ideas if there is time: more levels (generator approach in this chat: exit = farthest room, doors on the tree path with changing colours, shards in dead ends, hunters in far rooms; validate with the solver test), a tutorial overlay on level 1, a high-score table, hunters that change layer, music.
+- Old build folder `desktop/out/The Key and the Curve-win32-x64` (368 MB) is still there: that app was running during this pass. Close it, then delete the folder.
+- Controller phasing (yaw dial + BOOT steps) still not tried on the real board: check direction and the "turn needed per layer" setting; tilt direction may need invert/swap in Settings.
+- Playtest levels 5–7 by hand for difficulty (par is 4.5 s per solver move); tweak a recipe (hunterSpeed, shiftEvery, seed) and rerun `npm run levels` if one feels off.
+- Music is synthesized on the fly and needs a key press or click before browsers allow audio; check it on the demo laptop's speakers and set the volume in Settings.
+- Ideas: a compass towards the nearest shard on the disk rim, an endless mode that generates levels on the fly with the generator, controller vibration for shifter warnings if a motor is ever fitted.

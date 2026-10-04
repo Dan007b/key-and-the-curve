@@ -125,9 +125,17 @@ Twist steps are what you dial in: keys, the BOOT button, or turning the controll
 
 **Hunters** move like the marble does, room by room, along the shortest route through the maze (they drift through doors, but not through walls). They only chase when they can see you, that is, when you share their layer; otherwise they patrol. Rooms are convex, so a straight move to the next doorway never cuts through a wall.
 
+**Shifters** are hunters that move along w on their own, on a fixed timetable: a shifter that starts in layer b and steps s layers every T seconds is in layer
+
+  (b + s·⌊t / T⌋) mod 5
+
+at game time t. Because that is a plain function of the clock, it is predictable: the game knows the next layer and how long until the shift, and for the last 1.5 s the shifter flickers towards its next colour (and fades in if that colour is yours).
+
 **The 4D body.** The inset shows a tesseract (16 vertices (±1, ±1, ±1, ±1), 32 edges) projected 4D → 3D by perspective along w, x′ = x·s/(d − w) with d = 3, then drawn with a 3D camera. It is rotated in the XW plane by your phase angle, so twisting visibly turns it through the fourth dimension and a pillar lap jumps it a fifth of a turn. Rotations in 4D happen in planes, not about axes; XW turns the x direction into w, which is why the inner and outer cubes appear to swap through each other.
 
-**Why it is fair.** A breadth-first search over (room, holonomy step, twist step, shards held) proves every level can be finished, and shows level 3 (twisting jammed) cannot be finished without looping (`tests/levels.test.ts`). An autopilot also plays levels 1 and 3 with the real physics.
+**Why it is fair.** A breadth-first search over (room, holonomy step, twist step, shards held) proves every level can be finished (`game/src/game/solver.ts`). Crossing a passage changes the holonomy step by that passage's jump, the carried frame's turn against the destination's reference frame, which is always a whole number of 72° steps. The same search shows that the twist-jammed levels (3 and 6) cannot be finished on the spanning tree alone, so you must loop, and that no level can be finished with its doors shut. Its shortest solution is then played by an autopilot with the real physics, for every level (`tests/levels.test.ts`).
+
+**Generated levels.** Levels 5–7 come from recipes (`game/src/game/generator.ts`). The exit goes in the room farthest from the start; doors go evenly along the shortest route to it, each a different colour from the last; shards go in dead ends, spread out farthest-first; hunters go in far rooms. A recipe can also open "pillar loops": all four passages around a pillar, so a single lap (one layer) is possible there. A candidate is kept only if the solver accepts it on all three counts above; otherwise the next seed is tried.
 
 ## 9. Numerical care, in one table
 

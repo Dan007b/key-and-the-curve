@@ -1,0 +1,68 @@
+{
+  "name": "Flux",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 3,
+  "seed": 43,
+  "extraOpenings": 5,
+  "start": 0,
+  "exit": 31,
+  "doors": [
+    {
+      "tile": 6,
+      "edge": 1,
+      "layer": 1
+    },
+    {
+      "tile": 29,
+      "edge": 1,
+      "layer": 3
+    },
+    {
+      "tile": 2,
+      "edge": 4,
+      "layer": 1
+    }
+  ],
+  "shards": [
+    {
+      "tile": 33,
+      "layer": 3
+    },
+    {
+      "tile": 43,
+      "layer": 0
+    },
+    {
+      "tile": 30,
+      "layer": 3
+    },
+    {
+      "tile": 35,
+      "layer": 4
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 34,
+      "layer": 1,
+      "shiftEvery": 7
+    },
+    {
+      "tile": 48,
+      "layer": 3,
+      "shiftEvery": 7,
+      "shiftStep": -1
+    },
+    {
+      "tile": 36,
+      "layer": 0
+    }
+  ],
+  "hunterSpeed": 0.9,
+  "par": 160,
+  "intro": "Two shifters cycle through the colours in opposite directions, and a red hunter never leaves red. The ring around your 4D body shows which colour every hunter is in right now (shifters have a white outline).",
+  "hint": "Two shifters, opposite ways round. Check the phase ring before you phase."
+}

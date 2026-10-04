@@ -16,7 +16,7 @@ import { apply, identity, mul, rotation, translationTo } from '../math/lorentz';
 import type { Mat3, ReadonlyMat3, Vec3 } from '../math/lorentz';
 import { toPoincare } from '../math/poincare';
 import type { Tiling } from '../math/tiling';
-import { HyperMesh, geodesicBand, hyperDisk, hyperRing, polygonFan, softGeodesicBand } from './hyperMesh';
+import { HyperMesh, dashedRing, geodesicBand, hyperDisk, hyperRing, polygonFan, softGeodesicBand } from './hyperMesh';
 import type { World } from '../game/world';
 import { POST_RADIUS, WALL_HALF_WIDTH } from '../game/world';
 import type { LevelSpec } from '../game/level';
@@ -70,7 +70,16 @@ export interface ViewState {
   /** The layer you are in (0..4). */
   layer: number;
   shards: { position: Vec3; layer: number; collected: boolean }[];
-  hunters: { position: Vec3; layer: number; chasing: boolean }[];
+  hunters: {
+    position: Vec3;
+    layer: number;
+    chasing: boolean;
+    /** Shifters change layer on a timetable; nextLayer is where they go next. */
+    shifter: boolean;
+    nextLayer: number;
+    /** 0 normally; rises 0 → 1 over the warning window before a shift. */
+    warning: number;
+  }[];
   exit: { position: Vec3; open: boolean };
   /** Seconds of post-hit protection left (the marble blinks). */
   invulnerable: number;
@@ -106,6 +115,7 @@ export class DiskView {
   private hunterBodies!: HyperMesh;
   private hunterHalos!: HyperMesh;
   private hunterCores!: HyperMesh;
+  private hunterShift!: HyperMesh;
   private portal!: HyperMesh;
   private readonly tileMatrices: Mat3[] = [];
   private readonly tileVisible: boolean[] = [];
@@ -188,7 +198,9 @@ export class DiskView {
     this.hunterHalos = new HyperMesh(hyperRing(HUNTER_RADIUS * 1.05, HUNTER_RADIUS * 1.6, 12), Math.max(1, spec.hunters.length), 'additive', 9);
     this.hunterBodies = new HyperMesh(hyperDisk(HUNTER_RADIUS, 7), Math.max(1, spec.hunters.length), 'alpha', 10);
     this.hunterCores = new HyperMesh(hyperDisk(HUNTER_RADIUS * 0.45, 16), Math.max(1, spec.hunters.length), 'alpha', 11);
-    this.meshes = [this.fills, this.grid, this.wallGlow, this.walls, this.doorGlow, this.doors, this.posts, this.portal, this.shards, this.hunterHalos, this.hunterBodies, this.hunterCores];
+    // Shifters wear a spinning dashed ring in the colour they shift into next.
+    this.hunterShift = new HyperMesh(dashedRing(HUNTER_RADIUS * 1.7, HUNTER_RADIUS * 2.05, 5, 0.55, 4), Math.max(1, spec.hunters.length), 'alpha', 12);
+    this.meshes = [this.fills, this.grid, this.wallGlow, this.walls, this.doorGlow, this.doors, this.posts, this.portal, this.shards, this.hunterHalos, this.hunterBodies, this.hunterCores, this.hunterShift];
     for (const m of this.meshes) this.scene.add(m.mesh);
 
     this.tileMatrices.length = 0;
@@ -355,25 +367,37 @@ export class DiskView {
     this.shards.end();
 
     // Hunters: a spinning heptagon with a dark eye; bright and haloed in your
-    // layer (danger), faint ghosts in others (harmless).
+    // layer (danger), faint ghosts in others (harmless). A shifter about to
+    // change layer flickers towards its next colour, faster as the shift nears,
+    // and if that is your layer it fades in as a warning.
     this.hunterBodies.begin();
     this.hunterHalos.begin();
     this.hunterCores.begin();
+    this.hunterShift.begin();
     for (const h of state.hunters) {
       const mine = h.layer === state.layer;
       const m = this.at(viewInverse, h.position, t * (h.chasing ? 5 : 1.2));
       if (m[8] > CULL_COSH) continue;
-      const [r, g, b] = LAYER_RGB[h.layer];
-      this.hunterBodies.push(m, r, g, b, mine ? 1 : 0.2);
+      const flicker = h.warning > 0 && Math.sin(t * (12 + 28 * h.warning)) > 0;
+      const [r, g, b] = LAYER_RGB[flicker ? h.nextLayer : h.layer];
+      const incoming = h.warning > 0 && h.nextLayer === state.layer;
+      const alpha = mine ? 1 : incoming ? 0.2 + 0.6 * h.warning : 0.2;
+      this.hunterBodies.push(m, r, g, b, alpha);
       this.hunterCores.push(m, 0.02, 0.02, 0.05, mine ? 1 : 0.3);
       if (mine) {
         const k = h.chasing ? 0.7 + 0.3 * pulse : 0.4;
         this.hunterHalos.push(m, r * k, g * k, b * k, 1);
       }
+      if (h.shifter) {
+        const [nr, ng, nb] = LAYER_RGB[h.nextLayer];
+        const ring = this.at(viewInverse, h.position, -t * (1.5 + 6 * h.warning));
+        this.hunterShift.push(ring, nr, ng, nb, h.warning > 0 ? 0.55 + 0.45 * pulse : mine || incoming ? 0.6 : 0.25);
+      }
     }
     this.hunterBodies.end();
     this.hunterHalos.end();
     this.hunterCores.end();
+    this.hunterShift.end();
 
     this.updateTrail(state.trail, viewInverse, layerRgb);
     const body = mix([0.96, 0.97, 1.0], layerRgb, 0.35);

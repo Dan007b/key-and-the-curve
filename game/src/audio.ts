@@ -21,6 +21,11 @@ export class Sound {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /** The audio context, once a user gesture has unlocked it (shared with the music). */
+  context(): AudioContext | null {
+    return this.ctx;
+  }
+
   /** A short tone with an exponential decay. */
   private tone(freq: number, start: number, duration: number, gain: number, type: OscillatorType = 'sine'): void {
     const ctx = this.ctx;
@@ -63,6 +68,12 @@ export class Sound {
   hurt(): void {
     this.tone(160, 0, 0.35, 0.22, 'sawtooth');
     this.tone(110, 0.08, 0.4, 0.18, 'sawtooth');
+  }
+
+  /** A shifting hunter just moved into your layer: two quick high blips. */
+  alarm(): void {
+    this.tone(1320, 0, 0.09, 0.08, 'square');
+    this.tone(1320, 0.13, 0.09, 0.08, 'square');
   }
 
   /** All lives gone. */

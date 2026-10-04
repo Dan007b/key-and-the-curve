@@ -1,0 +1,53 @@
+{
+  "name": "Shifter",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 3,
+  "seed": 33,
+  "extraOpenings": 4,
+  "start": 0,
+  "exit": 59,
+  "doors": [
+    {
+      "tile": 31,
+      "edge": 2,
+      "layer": 4
+    },
+    {
+      "tile": 7,
+      "edge": 3,
+      "layer": 1
+    }
+  ],
+  "shards": [
+    {
+      "tile": 60,
+      "layer": 2
+    },
+    {
+      "tile": 27,
+      "layer": 1
+    },
+    {
+      "tile": 34,
+      "layer": 4
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 20,
+      "layer": 2,
+      "shiftEvery": 8
+    },
+    {
+      "tile": 28,
+      "layer": 0
+    }
+  ],
+  "hunterSpeed": 0.8,
+  "par": 160,
+  "intro": "Not every hunter stays in one colour. A shifter slides to the next colour every few seconds. Its spinning dashed ring shows the colour it will move into, and it flickers just before it goes. If it is about to slide into your colour, be somewhere else.",
+  "hint": "Dashed ring = the colour a shifter moves into next. It flickers just before it shifts."
+}

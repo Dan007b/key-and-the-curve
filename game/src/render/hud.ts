@@ -19,7 +19,8 @@ export interface HudState {
   lives: number;
   maxLives: number;
   shards: { layer: number; collected: boolean }[];
-  hunterLayers: number[];
+  /** Each hunter's current layer; shifters change layer over time. */
+  hunters: { layer: number; shifter: boolean }[];
   time: number;
   /** 0..1 how close a hunter in your layer is. */
   danger: number;
@@ -62,6 +63,10 @@ export class Hud {
   private readonly ringMarks: SVGGElement;
   private readonly overlay: HTMLDivElement;
   private readonly toast: HTMLDivElement;
+  private readonly tip: HTMLDivElement;
+  private readonly tipText: HTMLDivElement;
+  private readonly tipMarker: HTMLDivElement;
+  private tipAnchor: unknown = null;
   private toastTimer = 0;
   private overlayAction: (() => void) | null = null;
 
@@ -99,6 +104,10 @@ export class Hud {
     inset.appendChild(this.ring);
 
     this.toast = el('div', 'hud-toast hidden', this.root);
+    this.tipMarker = el('div', 'tip-marker hidden', this.root);
+    this.tip = el('div', 'hud-tip hidden', this.root);
+    el('div', 'hud-tip-label', this.tip, 'Tutorial');
+    this.tipText = el('div', 'hud-tip-text', this.tip);
     this.overlay = el('div', 'overlay hidden', parent);
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' && this.overlayAction) {
@@ -175,12 +184,15 @@ export class Hud {
     let marks = '';
     for (let i = 0; i < LAYERS; i++) {
       const a = ((i * LAYER_DEG - 90) * Math.PI) / 180;
-      const hunters = s.hunterLayers.filter((l) => l === i).length;
+      const hunters = s.hunters.filter((h) => h.layer === i);
       const shards = s.shards.filter((sh) => !sh.collected && sh.layer === i).length;
       const x = 50 + 35 * Math.cos(a);
       const y = 50 + 35 * Math.sin(a);
       const parts: string[] = [];
-      for (let k = 0; k < hunters; k++) parts.push(`<circle cx="${(x - 4 + k * 4).toFixed(1)}" cy="${(y - 2).toFixed(1)}" r="1.7" fill="${LAYER_CSS[i]}" stroke="#000" stroke-width="0.6"/>`);
+      // Shifters get a white outline: they won't stay in this layer.
+      hunters.forEach((h, k) =>
+        parts.push(`<circle cx="${(x - 4 + k * 4).toFixed(1)}" cy="${(y - 2).toFixed(1)}" r="1.7" fill="${LAYER_CSS[i]}" stroke="${h.shifter ? '#fff' : '#000'}" stroke-width="${h.shifter ? 0.8 : 0.6}"/>`),
+      );
       for (let k = 0; k < shards; k++) parts.push(`<rect x="${(x - 3.5 + k * 4).toFixed(1)}" y="${(y + 1).toFixed(1)}" width="2.6" height="2.6" transform="rotate(45 ${(x - 2.2 + k * 4).toFixed(1)} ${(y + 2.3).toFixed(1)})" fill="${LAYER_CSS[i]}"/>`);
       marks += parts.join('');
     }
@@ -243,6 +255,34 @@ export class Hud {
       l.el.style.opacity = String(Math.min(1, (4.5 - age) / 1.2));
       return true;
     });
+  }
+
+  /**
+   * Shows a tutorial tip (or hides it with null). `anchor` is something the
+   * caller can locate on screen (see updateTip); the marker rings it.
+   */
+  setTip(text: string | null, color = 'var(--accent)', anchor: unknown = null): void {
+    if (text === null) {
+      this.tip.classList.add('hidden');
+      this.tipMarker.classList.add('hidden');
+      this.tipAnchor = null;
+      return;
+    }
+    if (this.tipText.textContent !== text) this.tipText.textContent = text;
+    this.tip.style.borderColor = color;
+    this.tip.classList.remove('hidden');
+    this.tipAnchor = anchor;
+    this.tipMarker.style.borderColor = color;
+    this.tipMarker.style.color = color;
+    this.tipMarker.classList.toggle('hidden', anchor === null);
+  }
+
+  /** Keeps the tip's marker on its anchor; `locate` maps an anchor to screen px. */
+  updateTip(locate: (anchor: unknown) => { x: number; y: number }): void {
+    if (this.tipAnchor === null) return;
+    const at = locate(this.tipAnchor);
+    this.tipMarker.style.left = `${at.x}px`;
+    this.tipMarker.style.top = `${at.y}px`;
   }
 
   clearLabels(): void {

@@ -121,6 +121,8 @@ export class Game {
   phaseEvents: PhaseEvent[] = [];
   pickupEvents: number[] = [];
   hitEvents = 0;
+  /** Shifters that changed layer: which hunter, and the layer it moved into. */
+  shiftEvents: { hunter: number; to: number }[] = [];
   loopEvents: LoopEvent[] = [];
   /** Largest wall impact speed since the last read. */
   lastImpact = 0;
@@ -154,10 +156,13 @@ export class Game {
     const rand = makeRng(spec.seed * 7919 + 1);
     // Hunters are shadows: they drift through doors of any colour, but not through solid walls.
     const graph = { tiling: this.level.tiling, passable: (a: number, b: number) => this.passable(a, b, -2) || this.isDoor(a, b) };
-    this.hunters = spec.hunters.map((h) => new Hunter(h.layer, h.tile, graph, rand));
+    this.hunters = spec.hunters.map(
+      (h) => new Hunter(h.layer, h.tile, graph, rand, h.shiftEvery ? { every: h.shiftEvery, step: h.shiftStep ?? 1 } : null),
+    );
     this.phaseEvents = [];
     this.pickupEvents = [];
     this.hitEvents = 0;
+    this.shiftEvents = [];
     this.loopEvents = [];
     this.trail = [];
     this.trailClock = 0;
@@ -231,13 +236,18 @@ export class Game {
     return this.shardsLeft() === 0;
   }
 
-  /** 0..1: how close the nearest hunter in your layer is (1 = touching). */
+  /**
+   * 0..1: how close the nearest hunter in your layer is (1 = touching). A
+   * shifter about to move into your layer counts too, at a lower weight, so
+   * the warning glow starts before it can see you.
+   */
   danger(): number {
     let best = 0;
     for (const h of this.hunters) {
-      if (h.layer !== this.layer) continue;
+      const weight = h.layer === this.layer ? 1 : h.aboutToShift() && h.nextLayer === this.layer ? 0.6 : 0;
+      if (weight === 0) continue;
       const d = distance(h.position, this.marble.position());
-      best = Math.max(best, 1 - Math.min(1, Math.max(0, d - 0.3) / 1.5));
+      best = Math.max(best, weight * (1 - Math.min(1, Math.max(0, d - 0.3) / 1.5)));
     }
     return best;
   }
@@ -310,7 +320,10 @@ export class Game {
     if (this.invulnerable > 0) this.invulnerable = Math.max(0, this.invulnerable - dt);
     const speed = this.hunterSpeed();
     const me = this.marble.position();
-    for (const h of this.hunters) {
+    for (const [i, h] of this.hunters.entries()) {
+      const before = h.layer;
+      h.setTime(this.time);
+      if (h.layer !== before) this.shiftEvents.push({ hunter: i, to: h.layer });
       h.update(dt, speed, me, this.room, h.layer === this.layer);
       if (h.layer !== this.layer || this.invulnerable > 0) continue;
       if (distance(h.position, me) < this.settings.marble.radius + HUNTER_RADIUS) {
