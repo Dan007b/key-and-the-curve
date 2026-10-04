@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Relative asset paths, so the built game also loads from disk (desktop app).
+  base: './',
   server: {
     // Web Serial requires a secure context; localhost qualifies.
     host: 'localhost',

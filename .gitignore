@@ -18,3 +18,7 @@ desktop.ini
 
 # Local Claude Code preview config (machine-specific paths)
 .claude/launch.json
+
+# Desktop app build output
+desktop/web/
+desktop/out/

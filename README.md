@@ -17,13 +17,25 @@ A tesseract floats with the marble. It is the key. Magenta gates open only when 
 
 ## Play
 
+**Desktop app (Windows).** Build it once, then just double-click it:
+
+```powershell
+cd desktop
+npm install
+npm run package
+```
+
+This creates `desktop\out\The Key and the Curve-win32-x64\The Key and the Curve.exe`. Copy that whole folder anywhere (or zip it to share); it needs nothing else installed. The app finds the ESP32 controller's port by itself when you click **Connect controller**. For a quick run without packaging, use `npm start` in `desktop`.
+
+**In the browser:**
+
 ```powershell
 cd game
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173 in Chrome or Edge. Everything works with keyboard and mouse; the controller is optional.
+Open http://localhost:5173 in Chrome or Edge (they have Web Serial, which the controller needs). Everything works with keyboard and mouse; the controller is optional.
 
 | Input | Action |
 |---|---|
@@ -82,6 +94,7 @@ Hardware changes made during the build: a classic ESP32 (DevKitC V4) instead of 
 ## Project layout
 
 ```
+desktop/             Electron wrapper: Windows app with automatic controller port selection
 firmware/            PlatformIO project: ESP32 + BNO055 at 100 Hz
   src/main.cpp
   tools/             check_stream.py, calibrate.py, nvs_dump.py
