@@ -26,7 +26,7 @@ Paste this file (or point a new Claude Code chat at it) to continue. Project roo
 
 Danny's feedback: the tesseract-key matching is vague and too hard, there is no way to lose, not engaging enough to win. Chosen direction: **Phase Escape** (arcade chase in a 4D-layered hyperbolic maze).
 
-## Phase Escape design (being implemented now)
+## Phase Escape design (implemented)
 
 - **Goal:** collect every shard in the level, then reach the exit portal. **Lose:** hunters hit you 3 times (lives); hunters speed up over time. Timer + stars for score.
 - **4th dimension = 5 layers** (a circle of phase, 72° per layer), colour-coded: red, gold, green, blue, violet. Your layer tints the world.
@@ -46,4 +46,10 @@ Danny's feedback: the tesseract-key matching is vague and too hard, there is no 
 - [x] Rendering: layer tint, doors, shards, hunters, portal, phase ring (`render/diskView.ts`, `hud.ts`, `keyView.ts` = 4D body)
 - [x] Inputs: Q/E/Space, controller yaw twist (`yawRate` in serialProtocol) + BOOT steps
 - [x] Five levels (`levels/1-slip … 5-escape.json`) + 109 tests (solver, rules, autopilot playthroughs of levels 1 and 3)
-- [ ] Docs/README/demo script/screenshots (scenes: title, doors, hunted, curvature, final), desktop rebuild, push
+- [x] Docs/README/demo script/screenshots (scenes: title, doors, hunted, curvature, final), desktop rebuild (`desktop/out/Phase Escape-win32-x64/Phase Escape.exe`), pushed
+
+## Not yet verified / next ideas
+
+- Controller phasing (yaw dial + BOOT steps) not yet tried on the real board: check direction and the "turn needed per layer" setting; tilt direction may need invert/swap in Settings.
+- Old build folder `desktop/out/The Key and the Curve-win32-x64` can be deleted once that app is closed.
+- Ideas if there is time: more levels (generator approach in this chat: exit = farthest room, doors on the tree path with changing colours, shards in dead ends, hunters in far rooms; validate with the solver test), a tutorial overlay on level 1, a high-score table, hunters that change layer, music.
