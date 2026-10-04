@@ -110,6 +110,27 @@ describe('autopilot playthroughs (real physics and gates)', () => {
     finish(game);
   });
 
+  it('level 5: three gates, the key carrying its twists and loops between them', () => {
+    const game = new Game();
+    game.load(LEVELS[4]);
+    // Gate A wants ZW 90° and no curvature turn: twist, take the direct route.
+    twist(game, [0, 0, Math.PI / 2], 1);
+    expect(drive(game, routeWaypoints(game, [0, 4, 14, 3, 10]))).toBeLessThan(60);
+    idle(game, 0.5);
+    expect(game.gates[0].open).toBe(true);
+    // Gate B also wants −72°: the shortcut 2 → 9 loops a pillar counter-clockwise.
+    expect(drive(game, routeWaypoints(game, [10, 2, 9]))).toBeLessThan(60);
+    expect((game.holonomy() * 180) / Math.PI).toBeCloseTo(-72, 9);
+    idle(game, 0.5);
+    expect(game.gates[1].open).toBe(true);
+    // Gate C adds an XW twist on top; the −72° is still being carried.
+    twist(game, [Math.PI / 2, 0, 0], 1);
+    expect(drive(game, routeWaypoints(game, [9, 29, 8, 25, 7, 21, 6, 5, 18]))).toBeLessThan(90);
+    idle(game, 0.5);
+    expect(game.gates[2].open).toBe(true);
+    finish(game);
+  });
+
   it('level 4: twist YW 90° and loop clockwise, then the gate opens', () => {
     const game = new Game();
     game.load(LEVELS[3]);
@@ -121,5 +142,25 @@ describe('autopilot playthroughs (real physics and gates)', () => {
     idle(game, 0.5);
     expect(game.gates[0].open).toBe(true);
     finish(game);
+  });
+});
+
+describe('loop detection', () => {
+  it('reports a −72° loop around the right pillar on level 3', () => {
+    const game = new Game();
+    game.load(LEVELS[2]);
+    drive(game, routeWaypoints(game, [0, 4, 18, 5, 0]));
+    expect(game.loopEvents).toHaveLength(1);
+    const [loop] = game.loopEvents;
+    expect(loop.degrees).toBe(-72);
+    const [t, k] = LEVELS[2].markedPillars![0];
+    expect(loop.pillars).toEqual([game.level.world.roomPosts[t][k]]);
+  });
+
+  it('reports nothing for going there and back', () => {
+    const game = new Game();
+    game.load(LEVELS[0]);
+    drive(game, routeWaypoints(game, [0, 4, 18, 4, 0]));
+    expect(game.loopEvents).toHaveLength(0);
   });
 });

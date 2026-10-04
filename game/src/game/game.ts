@@ -17,6 +17,8 @@ import type { InputSource } from '../input/InputSource';
 import { approach, fitDistance, frobenius, identity4, mul4, planeRotation, rotationFromList, twistStep } from '../math/four';
 import type { Mat4 } from '../math/four';
 import type { GateSpec } from './level';
+import { toKlein } from '../math/poincare';
+import type { Vec3 } from '../math/lorentz';
 
 /** Physics substep: 240 Hz, so a marble at top speed moves < 0.015 per step. */
 export const PHYSICS_DT = 1 / 240;
@@ -49,6 +51,40 @@ export interface Gate {
   wall: number;
   across: number;
   open: boolean;
+}
+
+/** A closed loop that turned the key: emitted when the marble re-enters a room with a new holonomy. */
+export interface LoopEvent {
+  /** Rotation picked up around this loop, degrees (−72 per counter-clockwise pillar). */
+  degrees: number;
+  /** Posts (pillars) the loop went around. */
+  pillars: number[];
+  /** World point to label: the centroid of the enclosed pillars. */
+  where: Vec3;
+}
+
+/** Trail samples per second, and how many are kept (30 s). */
+const TRAIL_HZ = 30;
+export const TRAIL_LENGTH = 900;
+
+/**
+ * Winding number of a closed polygon (Klein-disk points) around point q.
+ * Geodesics are straight lines in the Klein model, so the polygon through
+ * room centres is drawn exactly.
+ */
+export function windingNumber(poly: readonly [number, number][], q: readonly [number, number]): number {
+  let w = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i];
+    const [x2, y2] = poly[(i + 1) % poly.length];
+    const isLeft = (x2 - x1) * (q[1] - y1) - (q[0] - x1) * (y2 - y1);
+    if (y1 <= q[1]) {
+      if (y2 > q[1] && isLeft > 0) w++;
+    } else if (y2 <= q[1] && isLeft < 0) {
+      w--;
+    }
+  }
+  return w;
 }
 
 /** What the HUD and views need to know about the gate the marble is at. */
@@ -84,6 +120,13 @@ export class Game {
   gateReading: GateReading | null = null;
   /** Gate indices opened since the last read (for sound and the HUD). */
   openedEvents: number[] = [];
+  /** Loops closed since the last read. */
+  loopEvents: LoopEvent[] = [];
+  /** Recent marble positions (world), oldest first, sampled at 30 Hz. */
+  trail: Vec3[] = [];
+  /** Rooms entered since the last loop closed, with the holonomy on entry. */
+  private history: { room: number; holonomy: number }[] = [];
+  private trailClock = 0;
 
   private accumulator = 0;
   private colliders: Collider[] = [];
@@ -105,6 +148,10 @@ export class Game {
     this.key = identity4();
     this.gateReading = null;
     this.openedEvents = [];
+    this.loopEvents = [];
+    this.trail = [];
+    this.trailClock = 0;
+    this.history = [{ room: spec.start, holonomy: 0 }];
     const { world, tiling } = this.level;
     this.gates = (spec.gates ?? []).map((g) => ({
       spec: g,
@@ -248,6 +295,12 @@ export class Game {
       const impact = this.marble.step(PHYSICS_DT, ax, ay, this.colliders, this.twistMode ? TWIST_BRAKE : 0);
       this.lastImpact = Math.max(this.lastImpact, impact);
       this.trackRoom();
+      this.trailClock += PHYSICS_DT;
+      if (this.trailClock >= 1 / TRAIL_HZ) {
+        this.trailClock = 0;
+        this.trail.push(this.marble.position());
+        if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
+      }
     }
     // Ease the camera back onto the carried frame.
     this.cameraOffset *= Math.exp(-dt / CAMERA_EASE);
@@ -269,8 +322,52 @@ export class Game {
     this.onRoomChange();
   }
 
-  /** Hook for loop detection and the trail (Phase 7). */
-  protected onRoomChange(): void {}
+  /**
+   * Loop detection. Revisiting a room closes a loop; if the key's holonomy
+   * changed, the loop enclosed pillars, so report how much and which. Either
+   * way the history is cut back, so the next loop is measured fresh.
+   */
+  private onRoomChange(): void {
+    const holonomy = this.holonomy();
+    const i = this.history.findIndex((h) => h.room === this.room);
+    if (i === -1) {
+      this.history.push({ room: this.room, holonomy });
+      return;
+    }
+    const loopRooms = [...this.history.slice(i).map((h) => h.room), this.room];
+    const delta = wrapAngle(holonomy - this.history[i].holonomy);
+    this.history = this.history.slice(0, i + 1);
+    this.history[i].holonomy = holonomy;
+    if (Math.abs(delta) < 1e-6 && loopRooms.length < 5) return;
+    this.reportLoop(loopRooms);
+  }
+
+  private reportLoop(rooms: number[]): void {
+    const { tiling, world } = this.level;
+    const poly = rooms.slice(0, -1).map((r) => toKlein(tiling.tiles[r].center));
+    const candidates = new Set(rooms.flatMap((r) => world.roomPosts[r]));
+    const pillars: number[] = [];
+    let turns = 0;
+    for (const id of candidates) {
+      const w = windingNumber(poly, toKlein(world.posts[id].position));
+      if (w !== 0) {
+        pillars.push(id);
+        turns += w;
+      }
+    }
+    if (turns === 0) return;
+    // Each pillar contributes the area of the dual polygon around it: q rooms
+    // meet there, and that q-gon has corners of 2π/p, so its area is
+    // (q − 2)·180° − q·360°/p (72° for {5,4}). Counter-clockwise (positive
+    // winding) laps turn the key clockwise.
+    const { p, q } = tiling.metrics;
+    const perPillar = (q - 2) * 180 - (q * 360) / p;
+    const where = pillars
+      .map((id) => world.posts[id].position)
+      .reduce((a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]] as Vec3, [0, 0, 0] as Vec3);
+    const norm = Math.sqrt(Math.max(1e-12, where[2] * where[2] - where[0] * where[0] - where[1] * where[1]));
+    this.loopEvents.push({ degrees: -turns * perPillar, pillars, where: [where[0] / norm, where[1] / norm, where[2] / norm] });
+  }
 
   private checkGoal(): void {
     if (this.completed) return;

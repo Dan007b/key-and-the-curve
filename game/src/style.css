@@ -149,6 +149,8 @@ canvas {
 .hud-buttons {
   position: absolute;
   left: 18px;
+  /* Stop short of the key inset in the bottom-right corner. */
+  right: calc(var(--inset-size, 240px) + 2 * var(--inset-margin, 16px));
   bottom: 16px;
   display: flex;
   flex-wrap: wrap;
@@ -269,6 +271,130 @@ canvas {
 
 @media (max-width: 700px) {
   .hud-left {
-    max-width: 55vw;
+    max-width: calc(100vw - 36px);
+  }
+  .hud-right {
+    top: auto;
+    bottom: calc(var(--inset-size, 140px) + var(--inset-margin, 16px) + 44px);
+  }
+  .hud-status,
+  .hud-fps {
+    display: none;
+  }
+  .hud-button {
+    padding: 6px 9px;
+  }
+}
+
+.card.wide {
+  max-width: 600px;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+
+.settings h2 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.settings-row small {
+  grid-column: 2;
+  color: var(--muted);
+}
+
+.settings-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-slider input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.settings-slider output {
+  min-width: 82px;
+  font: 12px ui-monospace, Consolas, monospace;
+  color: var(--accent);
+}
+
+.settings-pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings select {
+  background: #11172a;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.level-grid button {
+  text-align: left;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 6px 0 10px;
+}
+
+.help-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(42, 54, 84, 0.6);
+  color: #c3cdea;
+}
+
+.help-table td:first-child {
+  white-space: nowrap;
+  font: 12px ui-monospace, Consolas, monospace;
+  color: var(--accent);
+}
+
+.loop-label {
+  position: absolute;
+  transform: translate(-50%, -140%);
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(30, 14, 52, 0.85);
+  border: 1px solid #c08cff;
+  color: #e6d4ff;
+  font: 700 13px ui-monospace, Consolas, monospace;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .settings-row {
+    grid-template-columns: 1fr;
+  }
+  .settings-row small {
+    grid-column: 1;
   }
 }

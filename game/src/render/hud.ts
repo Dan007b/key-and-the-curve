@@ -134,11 +134,11 @@ export class Hud {
   }
 
   /** Shows a centred card with a title, body text and one action (also Enter). */
-  showCard(title: string, body: string, action: string, onAction: () => void, extra?: HTMLElement): void {
+  showCard(title: string, body: string, action: string, onAction: () => void, extra?: HTMLElement, wide = false): void {
     this.overlay.innerHTML = '';
-    const card = el('div', 'card', this.overlay);
+    const card = el('div', wide ? 'card wide' : 'card', this.overlay);
     el('h1', '', card, title);
-    for (const para of body.split('\n')) el('p', '', card, para);
+    for (const para of body.split('\n').filter((x) => x.length > 0)) el('p', '', card, para);
     if (extra) card.appendChild(extra);
     const btn = el('button', 'card-button', card, `${action} (Enter)`);
     this.overlayAction = () => {
@@ -149,6 +149,11 @@ export class Hud {
     this.overlay.classList.remove('hidden');
   }
 
+  /** Closes the card as if its button was pressed. */
+  closeCard(): void {
+    this.overlayAction?.();
+  }
+
   hideCard(): void {
     this.overlay.classList.add('hidden');
     this.overlayAction = null;
@@ -156,5 +161,35 @@ export class Hud {
 
   cardVisible(): boolean {
     return !this.overlay.classList.contains('hidden');
+  }
+
+  private labels: { el: HTMLDivElement; born: number; anchor: unknown }[] = [];
+
+  /** Adds a floating label (e.g. a loop's angle) tied to an anchor the caller can locate on screen. */
+  addLabel(text: string, anchor: unknown): void {
+    const e = el('div', 'loop-label', this.root, text);
+    this.labels.push({ el: e, born: performance.now(), anchor });
+  }
+
+  /** Positions and fades labels; `locate` maps an anchor to screen px. Labels live 4.5 s. */
+  updateLabels(locate: (anchor: unknown) => { x: number; y: number }): void {
+    const now = performance.now();
+    this.labels = this.labels.filter((l) => {
+      const age = (now - l.born) / 1000;
+      if (age > 4.5) {
+        l.el.remove();
+        return false;
+      }
+      const at = locate(l.anchor);
+      l.el.style.left = `${at.x}px`;
+      l.el.style.top = `${at.y}px`;
+      l.el.style.opacity = String(Math.min(1, (4.5 - age) / 1.2));
+      return true;
+    });
+  }
+
+  clearLabels(): void {
+    for (const l of this.labels) l.el.remove();
+    this.labels = [];
   }
 }

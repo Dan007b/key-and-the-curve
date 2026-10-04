@@ -6,8 +6,13 @@
  */
 
 import * as THREE from 'three';
-import { identity, mul } from '../math/lorentz';
-import type { Mat3, ReadonlyMat3 } from '../math/lorentz';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { apply, identity, mul } from '../math/lorentz';
+import type { Mat3, ReadonlyMat3, Vec3 } from '../math/lorentz';
+import { toPoincare } from '../math/poincare';
+import { TRAIL_LENGTH } from '../game/game';
 import type { Tiling } from '../math/tiling';
 import { HyperMesh, geodesicBand, hyperDisk, polygonFan, softGeodesicBand } from './hyperMesh';
 import type { World } from '../game/world';
@@ -66,6 +71,8 @@ export interface ViewState {
   gateOpen: boolean[];
   /** Post ids to pulse (marked pillars, loop labels). */
   highlightPosts: Set<number>;
+  /** Recent marble positions (world), oldest first, or null to hide the trail. */
+  trail: readonly Vec3[] | null;
 }
 
 export class DiskView {
@@ -96,6 +103,8 @@ export class DiskView {
   private readonly marble: THREE.Group;
   private readonly marbleBody: THREE.Mesh;
   private readonly twistRing: THREE.Mesh;
+  private readonly trail: LineSegments2;
+  private readonly trailGeometry: LineSegmentsGeometry;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -129,6 +138,49 @@ export class DiskView {
     for (const m of [this.marbleBody, shine, this.twistRing]) m.renderOrder = 50;
     this.marble.add(this.marbleBody, shine, this.twistRing);
     this.scene.add(this.marble);
+
+    // The holonomy trail: the marble's recent path, fading with age.
+    this.trailGeometry = new LineSegmentsGeometry();
+    this.trailGeometry.setPositions(new Float32Array(TRAIL_LENGTH * 6));
+    this.trailGeometry.setColors(new Float32Array(TRAIL_LENGTH * 6));
+    this.trail = new LineSegments2(
+      this.trailGeometry,
+      new LineMaterial({ linewidth: 2.5, vertexColors: true, transparent: true, opacity: 0.9, depthTest: false }),
+    );
+    this.trail.frustumCulled = false;
+    this.trail.renderOrder = 40;
+    this.scene.add(this.trail);
+  }
+
+  /** Writes the trail as disk-space segments from point i to i+1, brightest at the newest end. */
+  private updateTrail(points: readonly Vec3[] | null, viewInverse: ReadonlyMat3): void {
+    if (!points || points.length < 2) {
+      this.trail.visible = false;
+      return;
+    }
+    this.trail.visible = true;
+    const pos = (this.trailGeometry.attributes.instanceStart as THREE.InterleavedBufferAttribute).data;
+    const col = (this.trailGeometry.attributes.instanceColorStart as THREE.InterleavedBufferAttribute).data;
+    const p = pos.array as Float32Array;
+    const c = col.array as Float32Array;
+    const n = Math.min(points.length, TRAIL_LENGTH);
+    let prev = toPoincare(apply(viewInverse, points[points.length - n]));
+    for (let i = 1; i < n; i++) {
+      const cur = toPoincare(apply(viewInverse, points[points.length - n + i]));
+      const k = (i - 1) * 6;
+      p[k] = prev[0]; p[k + 1] = prev[1]; p[k + 2] = 0;
+      p[k + 3] = cur[0]; p[k + 4] = cur[1]; p[k + 5] = 0;
+      for (const [o, age] of [[0, i - 1], [3, i]] as const) {
+        const f = age / n;
+        c[k + o] = 1.0 * f;
+        c[k + o + 1] = 0.6 * f;
+        c[k + o + 2] = 0.25 * f;
+      }
+      prev = cur;
+    }
+    this.trailGeometry.instanceCount = n - 1;
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
   }
 
   /** Installs a loaded level's geometry. */
@@ -191,6 +243,7 @@ export class DiskView {
     }
     this.centerPx = { x: width / 2, y: height / 2 };
     this.camera.updateProjectionMatrix();
+    (this.trail.material as LineMaterial).resolution.set(width, height);
   }
 
   /** Draws the plane as seen from the frame whose inverse is `viewInverse`. */
@@ -270,6 +323,7 @@ export class DiskView {
     });
     this.posts.end();
 
+    this.updateTrail(state.trail, viewInverse);
     this.twistRing.visible = state.twistMode;
     (this.twistRing.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.4 * pulse;
 
