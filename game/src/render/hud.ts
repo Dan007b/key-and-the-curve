@@ -117,7 +117,7 @@ export class Hud {
     el('h1', '', card, title);
     for (const para of body.split('\n')) el('p', '', card, para);
     if (extra) card.appendChild(extra);
-    const btn = el('button', 'card-button', card, `${action}  ⏎`);
+    const btn = el('button', 'card-button', card, `${action} (Enter)`);
     this.overlayAction = () => {
       this.hideCard();
       onAction();

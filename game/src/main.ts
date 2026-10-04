@@ -6,6 +6,8 @@ import { DiskView } from './render/diskView';
 import type { ViewState } from './render/diskView';
 import { Hud } from './render/hud';
 import { KeyboardInput } from './input/KeyboardInput';
+import { SerialInput } from './input/SerialInput';
+import { CombinedInput } from './input/CombinedInput';
 import { Game } from './game/game';
 import { LEVELS } from './game/level';
 
@@ -19,6 +21,8 @@ app.appendChild(canvas);
 const view = new DiskView(canvas);
 const hud = new Hud(app);
 const keyboard = new KeyboardInput(canvas, () => view.diskRadiusPx);
+const serial = new SerialInput();
+const input = new CombinedInput(keyboard, serial);
 const game = new Game();
 
 let levelIndex = 0;
@@ -36,6 +40,33 @@ function startLevel(index: number): void {
   });
 }
 
+if (SerialInput.supported()) {
+  const connectButton = hud.button('Connect controller', 'Pick the ESP32 serial port (Chrome or Edge)', () => {
+    if (serial.connected()) {
+      void serial.disconnect();
+      return;
+    }
+    serial.connect().catch((err: unknown) => {
+      // Cancelling the port picker is not an error worth shouting about.
+      if (!(err instanceof DOMException && err.name === 'NotFoundError')) {
+        hud.showCard(
+          'Could not open the controller',
+          `${String(err)}\nIs another program (a serial monitor) using the port?`,
+          'OK',
+          () => {},
+        );
+      }
+    });
+  });
+  setInterval(() => {
+    connectButton.textContent = serial.connected() ? 'Disconnect controller' : 'Connect controller';
+  }, 500);
+  hud.button('Set level', 'Hold the controller the way you want "flat" to be, then click', () => {
+    if (!serial.setLevel()) hud.showCard('No controller data yet', 'Connect the controller first.', 'OK', () => {});
+  });
+} else {
+  hud.button('Controller: use Chrome or Edge', 'Web Serial is not available in this browser', () => {});
+}
 hud.button('Restart', 'Restart this level', () => startLevel(levelIndex));
 hud.button('Next level', 'Skip to the next level', () => startLevel((levelIndex + 1) % LEVELS.length));
 
@@ -58,10 +89,10 @@ function draw(): void {
 }
 
 function step(dt: number): void {
-  keyboard.update(dt);
+  input.update(dt);
   keyboard.twistMode = game.twistMode;
   if (paused) return;
-  game.update(dt, keyboard);
+  game.update(dt, input);
   if (game.completed) {
     paused = true;
     const last = levelIndex === LEVELS.length - 1;
@@ -90,7 +121,7 @@ function tick(now: number): void {
   }
   hud.update({
     fps,
-    inputs: [keyboard.status()],
+    inputs: input.statuses(),
     twistMode: game.twistMode,
     twistAllowed: game.twistAllowed(),
     holonomyDeg: (game.holonomy() * 180) / Math.PI,
