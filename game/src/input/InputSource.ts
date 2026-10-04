@@ -1,6 +1,6 @@
 /**
  * Common interface for the keyboard/mouse and the ESP32 controller, so the
- * game never cares which one is driving it. CLAUDE.md §7.
+ * game never cares which one is driving it.
  */
 
 export interface InputStatus {
@@ -16,12 +16,10 @@ export interface InputStatus {
 export interface InputSource {
   /** Tilt in −1..1 per axis, screen-aligned (+x right, +y up), after deadzone and sensitivity. */
   tilt(): { x: number; y: number };
-  /** Rotation rates in rad/s that drive the XW, YW and ZW planes in twist mode. */
-  angularVelocity(): [number, number, number];
-  /** True once per trigger press (Space or the BOOT button); reading it consumes the press. */
-  twistToggled(): boolean;
-  /** True once per reset-key request; reading it consumes the request. */
-  resetKey(): boolean;
+  /** Whole-layer phase steps requested since the last read (+1 / −1 per press). Reading consumes them. */
+  phaseSteps(): number;
+  /** Continuous phase rate through the fourth dimension, degrees per second (controller twist). */
+  phaseRate(): number;
   status(): InputStatus;
   /** Advances any time-based smoothing. Called once per frame. */
   update?(dt: number): void;

@@ -47,14 +47,31 @@ export class Sound {
     this.tone(90 + 30 * speed, 0, 0.12, g, 'triangle');
   }
 
-  /** Twist mode on (rising) or off (falling). */
-  twist(on: boolean): void {
-    this.tone(on ? 520 : 390, 0, 0.09, 0.08, 'sine');
-    this.tone(on ? 780 : 260, 0.05, 0.1, 0.06, 'sine');
+  /** Phasing into a layer: a short sweep, pitched by layer. */
+  phase(layer: number, curvature: boolean): void {
+    const base = 300 * Math.pow(1.26, layer);
+    this.tone(base, 0, 0.12, 0.07, 'sine');
+    this.tone(base * 1.5, 0.04, 0.16, 0.05, curvature ? 'triangle' : 'sine');
   }
 
-  /** A gate opening: a rising arpeggio. */
-  gateOpen(): void {
+  /** Picking up a shard. */
+  pickup(): void {
+    [880, 1174.66, 1567.98].forEach((f, i) => this.tone(f, i * 0.05, 0.35, 0.07));
+  }
+
+  /** Hit by a hunter. */
+  hurt(): void {
+    this.tone(160, 0, 0.35, 0.22, 'sawtooth');
+    this.tone(110, 0.08, 0.4, 0.18, 'sawtooth');
+  }
+
+  /** All lives gone. */
+  caught(): void {
+    [392, 311.13, 246.94, 196].forEach((f, i) => this.tone(f, i * 0.16, 0.5, 0.1, 'triangle'));
+  }
+
+  /** The portal opening (last shard taken). */
+  portalOpen(): void {
     [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, i * 0.07, 0.5, 0.09));
   }
 

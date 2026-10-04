@@ -1,5 +1,5 @@
 /**
- * Level loading (CLAUDE.md §8). Levels are JSON files in /game/levels.
+ * Level loading. Levels are JSON files in /game/levels.
  */
 
 import { generateTiling } from '../math/tiling';
@@ -7,24 +7,26 @@ import type { Tiling } from '../math/tiling';
 import { generateMaze, roomDistances } from './maze';
 import type { Maze } from './maze';
 import { buildWorld } from './world';
-import type { World } from './world';
+import type { DoorEdge, World } from './world';
 import { referenceFrames } from './transport';
 import type { Mat3 } from '../math/lorentz';
 
-import level1 from '../../levels/1-rolling.json';
-import level2 from '../../levels/2-first-gate.json';
+import level1 from '../../levels/1-slip.json';
+import level2 from '../../levels/2-hunted.json';
 import level3 from '../../levels/3-curvature.json';
-import level4 from '../../levels/4-combine.json';
-import level5 from '../../levels/5-final.json';
+import level4 from '../../levels/4-swarm.json';
+import level5 from '../../levels/5-escape.json';
 
-import type { Plane } from '../math/four';
-
-export interface GateSpec {
-  /** The gate sits on this tile's edge; holonomy is measured on this side. */
+export interface ShardSpec {
   tile: number;
-  edge: number;
-  /** Target orientation as plane rotations in degrees, applied in order. */
-  target: [Plane, number][];
+  /** The layer the shard lives in: it can only be picked up there. */
+  layer: number;
+}
+
+export interface HunterSpec {
+  /** Spawn room. */
+  tile: number;
+  layer: number;
 }
 
 export interface LevelSpec {
@@ -38,15 +40,20 @@ export interface LevelSpec {
   open?: [number, number][];
   closed?: [number, number][];
   start: number;
-  goal: number;
-  /** Whether twist mode is allowed (false on the pure-holonomy level). */
+  /** Room with the exit portal (opens once every shard is collected). */
+  exit: number;
+  /** Whether you may twist through the fourth dimension (false: only curvature moves you). */
   twist?: boolean;
-  gates?: GateSpec[];
+  doors: DoorEdge[];
+  shards: ShardSpec[];
+  hunters: HunterSpec[];
+  /** Hunter chase speed at the start, units/s (it rises over time). */
+  hunterSpeed?: number;
+  /** Seconds for three stars. */
+  par: number;
   /** Pillars to highlight, as [tile, vertex] pairs. */
   markedPillars?: [number, number][];
-  /** One or two sentences shown at the start of the level. */
   intro: string;
-  /** Short reminder shown in the HUD while playing. */
   hint: string;
 }
 
@@ -87,11 +94,13 @@ export function loadLevel(spec: LevelSpec): LoadedLevel {
     open: spec.open,
     closed: spec.closed,
   });
-  if (maze.isRoom[spec.goal] !== 1) throw new Error(`level ${spec.name}: goal ${spec.goal} is not a room`);
-  if (!roomDistances(tiling, maze, spec.start).has(spec.goal)) {
-    throw new Error(`level ${spec.name}: goal unreachable`);
+  for (const r of [spec.exit, ...spec.shards.map((s) => s.tile), ...spec.hunters.map((h) => h.tile)]) {
+    if (maze.isRoom[r] !== 1) throw new Error(`level ${spec.name}: tile ${r} is not a room`);
   }
-  const world = buildWorld(tiling, maze, spec.gates ?? []);
+  if (!roomDistances(tiling, maze, spec.start).has(spec.exit)) {
+    throw new Error(`level ${spec.name}: exit unreachable`);
+  }
+  const world = buildWorld(tiling, maze, spec.doors);
   const references = referenceFrames(tiling, maze.tree, spec.start);
   return { spec, tiling, maze, world, references };
 }

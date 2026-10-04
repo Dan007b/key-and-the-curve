@@ -42,13 +42,12 @@ export function waypoints(game: Game, route: readonly number[]): Vec3[] {
 /**
  * Tilt input that heads for each waypoint in turn: a proportional pull
  * towards the target in screen coordinates, minus a velocity term so it
- * doesn't overshoot. Optional twist rates are passed through for scripted
- * twisting.
+ * doesn't overshoot. Phase steps can be queued for scripted phasing.
  */
 export class Autopilot implements InputSource {
   private index = 0;
-  rates: [number, number, number] = [0, 0, 0];
-  toggleRequested = false;
+  /** Phase steps to send on the next read. */
+  steps = 0;
 
   constructor(private readonly game: Game, private points: Vec3[] = []) {}
 
@@ -82,18 +81,14 @@ export class Autopilot implements InputSource {
     return { x: tx, y: ty };
   }
 
-  angularVelocity(): [number, number, number] {
-    return this.rates;
+  phaseSteps(): number {
+    const n = this.steps;
+    this.steps = 0;
+    return n;
   }
 
-  twistToggled(): boolean {
-    const t = this.toggleRequested;
-    this.toggleRequested = false;
-    return t;
-  }
-
-  resetKey(): boolean {
-    return false;
+  phaseRate(): number {
+    return 0;
   }
 
   status(): InputStatus {

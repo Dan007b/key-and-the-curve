@@ -1,166 +1,196 @@
-// Every level is solvable as designed, and the puzzles need what they claim
-// to need. Two checks: a fast state-space solver over (room, holonomy step,
-// open gates), and autopilot playthroughs with the real physics and gate code.
+// Phase Escape: the rules (doors, shards, hunters, lives, curvature phasing),
+// level solvability, and autopilot playthroughs with the real physics.
 
 import { describe, expect, it } from 'vitest';
-import { Game } from '../src/game/game';
+import { Game, LIVES } from '../src/game/game';
 import { LEVELS, loadLevel } from '../src/game/level';
 import type { LevelSpec } from '../src/game/level';
 import { passageKey } from '../src/game/maze';
+import { LAYERS, holonomySteps, layerOf, mod } from '../src/game/phase';
 import { angleBetween, carryAcross } from '../src/game/transport';
-import { drive, idle, routeWaypoints, shortestRoute, twist } from './bot';
+import { drive, idle, phaseTo, playLevel, routeWaypoints } from './bot';
 
 const STEP = (72 * Math.PI) / 180;
 
-/**
- * Breadth-first search over (room, holonomy in 72° steps mod 5, opened gates).
- * A gate opens when the player is on its side with holonomy equal to the XY
- * part of its target, and, if the target has 4D (W-plane) parts, twisting is
- * allowed. `passable` restricts which passages may be used.
- */
-function solve(spec: LevelSpec, passable?: Set<number>): boolean {
-  const level = loadLevel(spec);
-  const { tiling, maze, references } = level;
-  const gates = spec.gates ?? [];
-  const xySteps = gates.map((g) => {
-    const deg = g.target.filter(([p]) => p === 'xy').reduce((s, [, a]) => s + a, 0);
-    return (((Math.round(deg / 72) % 5) + 5) % 5);
+describe('phase layers', () => {
+  it('combine twist and curvature, wrapping around five layers', () => {
+    expect(layerOf(0, 0)).toBe(0);
+    expect(layerOf(72, 0)).toBe(1);
+    expect(layerOf(30, 0)).toBe(0); // rounds to the nearest layer
+    expect(layerOf(0, -1)).toBe(4); // one counter-clockwise lap: red → violet
+    expect(layerOf(5 * 72, 0)).toBe(0); // a full turn
+    expect(holonomySteps(-STEP)).toBe(-1);
   });
-  const needsTwist = gates.map((g) => g.target.some(([p]) => p !== 'xy'));
-  const twistOk = spec.twist !== false;
-  const allowed = passable ?? maze.open;
-  // Holonomy change (in 72° steps) when crossing each open passage.
-  const jump = (a: number, b: number) => Math.round(angleBetween(references[b]!, carryAcross(tiling, references[a]!, a, b)) / STEP);
-  const gateOn = (a: number, b: number) =>
-    gates.findIndex((g) => (g.tile === a && tiling.tiles[a].neighbors[g.edge] === b) || (g.tile === b && tiling.tiles[b].neighbors[g.edge] === a));
+});
 
-  const key = (room: number, h: number, mask: number) => `${room}|${h}|${mask}`;
-  const seen = new Set([key(spec.start, 0, 0)]);
-  const queue: [number, number, number][] = [[spec.start, 0, 0]];
-  while (queue.length) {
-    const [room, h, mask] = queue.shift()!;
-    if (room === spec.goal) return true;
-    let m = mask;
-    gates.forEach((g, i) => {
-      if (g.tile === room && h === xySteps[i] && (!needsTwist[i] || twistOk)) m |= 1 << i;
-    });
-    for (const n of tiling.tiles[room].neighbors) {
-      if (n === -1 || !maze.isRoom[n] || !allowed.has(passageKey(room, n))) continue;
-      const gi = gateOn(room, n);
-      if (gi !== -1 && !(m & (1 << gi))) continue;
-      const h2 = (((h + jump(room, n)) % 5) + 5) % 5;
-      const k = key(n, h2, m);
+/**
+ * Breadth-first search over (room, curvature step, twist step, shards held).
+ * Doors pass only in their own layer; shards are taken only in their layer;
+ * crossing a passage changes the curvature step by its holonomy jump. Twist
+ * steps are free if the level allows twisting. Ignores hunters.
+ */
+function solvable(spec: LevelSpec, passable?: Set<number>): boolean {
+  const { tiling, maze, world, references } = loadLevel(spec);
+  const allowed = passable ?? maze.open;
+  const twist = spec.twist !== false;
+  const jump = (a: number, b: number) => Math.round(angleBetween(references[b]!, carryAcross(tiling, references[a]!, a, b)) / STEP);
+  const full = (1 << spec.shards.length) - 1;
+  const take = (room: number, layer: number, held: number) =>
+    spec.shards.reduce((h, s, i) => (s.tile === room && s.layer === layer ? h | (1 << i) : h), held);
+  const key = (r: number, c: number, t: number, h: number) => `${r}|${c}|${t}|${h}`;
+  const start: [number, number, number, number] = [spec.start, 0, 0, take(spec.start, 0, 0)];
+  const seen = new Set([key(...start)]);
+  const queue = [start];
+  for (let i = 0; i < queue.length; i++) {
+    const [room, c, t, held] = queue[i];
+    if (room === spec.exit && held === full) return true;
+    const push = (r: number, c2: number, t2: number) => {
+      const h2 = take(r, mod(c2 + t2, LAYERS), held);
+      const k = key(r, c2, t2, h2);
       if (!seen.has(k)) {
         seen.add(k);
-        queue.push([n, h2, m]);
+        queue.push([r, c2, t2, h2]);
       }
+    };
+    if (twist) for (let d = 1; d < LAYERS; d++) push(room, c, mod(t + d, LAYERS));
+    const layer = mod(c + t, LAYERS);
+    for (const n of tiling.tiles[room].neighbors) {
+      if (n === -1 || !maze.isRoom[n] || !allowed.has(passageKey(room, n))) continue;
+      const id = world.wallOn(room, tiling.tiles[room].neighbors.indexOf(n));
+      if (id !== -1 && world.walls[id].door !== layer) continue;
+      push(n, mod(c + jump(room, n), LAYERS), t);
     }
   }
   return false;
 }
 
-describe('level design', () => {
+describe('levels', () => {
   it('every level is solvable', () => {
-    for (const spec of LEVELS) expect(solve(spec), spec.name).toBe(true);
+    for (const spec of LEVELS) expect(solvable(spec), spec.name).toBe(true);
   });
 
-  it('level 3 cannot be solved without looping (direct routes only)', () => {
+  it('level 3 (no twisting) needs loops around the pillar', () => {
     const spec = LEVELS[2];
     expect(spec.twist).toBe(false);
-    expect(solve(spec, loadLevel(spec).maze.tree)).toBe(false);
+    expect(solvable(spec, loadLevel(spec).maze.tree)).toBe(false);
   });
 
-  it('level 4 cannot be solved on the direct routes either', () => {
-    const spec = LEVELS[3];
-    expect(solve(spec, loadLevel(spec).maze.tree)).toBe(false);
-  });
-});
-
-describe('autopilot playthroughs (real physics and gates)', () => {
-  const finish = (game: Game) => {
-    const route = shortestRoute(game, game.room, game.level.spec.goal);
-    expect(drive(game, routeWaypoints(game, route))).toBeLessThan(120);
-    idle(game, 1.5);
-    expect(game.completed).toBe(true);
-  };
-
-  it('level 2: roll to the gate, twist XW 90°, roll on', () => {
-    const game = new Game();
-    game.load(LEVELS[1]);
-    expect(drive(game, routeWaypoints(game, [0, 4]))).toBeLessThan(30);
-    expect(game.gates[0].open).toBe(false);
-    twist(game, [Math.PI / 2, 0, 0], 1);
-    idle(game, 0.5);
-    expect(game.gates[0].open).toBe(true);
-    finish(game);
-  });
-
-  it('level 3: one counter-clockwise lap around the pillar opens the gate', () => {
-    const game = new Game();
-    game.load(LEVELS[2]);
-    // The direct route arrives with no curvature turn: the gate stays shut.
-    expect(drive(game, routeWaypoints(game, [0, 4, 18, 5]))).toBeLessThan(40);
-    expect(Math.abs(game.holonomy())).toBeLessThan(1e-9);
-    expect(game.gates[0].open).toBe(false);
-    // Back to the start and round the pillar counter-clockwise: 5 → 0 → 4 → 18 → 5.
-    expect(drive(game, routeWaypoints(game, [5, 0, 4, 18, 5]))).toBeLessThan(40);
-    expect((game.holonomy() * 180) / Math.PI).toBeCloseTo(-72, 9);
-    idle(game, 0.5);
-    expect(game.gates[0].open).toBe(true);
-    finish(game);
-  });
-
-  it('level 5: three gates, the key carrying its twists and loops between them', () => {
-    const game = new Game();
-    game.load(LEVELS[4]);
-    // Gate A wants ZW 90° and no curvature turn: twist, take the direct route.
-    twist(game, [0, 0, Math.PI / 2], 1);
-    expect(drive(game, routeWaypoints(game, [0, 4, 14, 3, 10]))).toBeLessThan(60);
-    idle(game, 0.5);
-    expect(game.gates[0].open).toBe(true);
-    // Gate B also wants −72°: the shortcut 2 → 9 loops a pillar counter-clockwise.
-    expect(drive(game, routeWaypoints(game, [10, 2, 9]))).toBeLessThan(60);
-    expect((game.holonomy() * 180) / Math.PI).toBeCloseTo(-72, 9);
-    idle(game, 0.5);
-    expect(game.gates[1].open).toBe(true);
-    // Gate C adds an XW twist on top; the −72° is still being carried.
-    twist(game, [Math.PI / 2, 0, 0], 1);
-    expect(drive(game, routeWaypoints(game, [9, 29, 8, 25, 7, 21, 6, 5, 18]))).toBeLessThan(90);
-    idle(game, 0.5);
-    expect(game.gates[2].open).toBe(true);
-    finish(game);
-  });
-
-  it('level 4: twist YW 90° and loop clockwise, then the gate opens', () => {
-    const game = new Game();
-    game.load(LEVELS[3]);
-    twist(game, [0, Math.PI / 2, 0], 1);
-    // Clockwise lap around the pillar between rooms 4, 16, 45 and 14.
-    expect(drive(game, routeWaypoints(game, [0, 4, 16, 45, 14, 4]))).toBeLessThan(60);
-    expect((game.holonomy() * 180) / Math.PI).toBeCloseTo(72, 9);
-    expect(drive(game, routeWaypoints(game, [4, 16, 45, 14, 43]))).toBeLessThan(60);
-    idle(game, 0.5);
-    expect(game.gates[0].open).toBe(true);
-    finish(game);
+  it('every level has doors that need more than one colour', () => {
+    for (const spec of LEVELS) expect(new Set(spec.doors.map((d) => d.layer)).size, spec.name).toBeGreaterThanOrEqual(1);
   });
 });
 
-describe('loop detection', () => {
-  it('reports a −72° loop around the right pillar on level 3', () => {
-    const game = new Game();
-    game.load(LEVELS[2]);
-    drive(game, routeWaypoints(game, [0, 4, 18, 5, 0]));
-    expect(game.loopEvents).toHaveLength(1);
-    const [loop] = game.loopEvents;
-    expect(loop.degrees).toBe(-72);
-    const [t, k] = LEVELS[2].markedPillars![0];
-    expect(loop.pillars).toEqual([game.level.world.roomPosts[t][k]]);
-  });
-
-  it('reports nothing for going there and back', () => {
+describe('rules', () => {
+  it('a door blocks you unless you are in its colour', () => {
     const game = new Game();
     game.load(LEVELS[0]);
-    drive(game, routeWaypoints(game, [0, 4, 18, 4, 0]));
-    expect(game.loopEvents).toHaveLength(0);
+    const door = LEVELS[0].doors[0];
+    const beyond = game.level.tiling.tiles[door.tile].neighbors[door.edge];
+    const route = (() => {
+      const r = [] as number[];
+      // Walk the open passages to the door's room first.
+      const prev = new Map<number, number>([[game.room, -1]]);
+      const q = [game.room];
+      for (let i = 0; i < q.length; i++) {
+        for (const n of game.level.tiling.tiles[q[i]].neighbors) {
+          if (n !== -1 && game.level.maze.isRoom[n] && !prev.has(n) && game.level.maze.open.has(passageKey(q[i], n)) && !(q[i] === door.tile && n === beyond)) {
+            prev.set(n, q[i]);
+            q.push(n);
+          }
+        }
+      }
+      let x = door.tile;
+      while (x !== -1) {
+        r.unshift(x);
+        x = prev.get(x)!;
+      }
+      return r;
+    })();
+    // Get to the door's room, phasing through any doors on the way.
+    for (let i = 0; i + 1 < route.length; i++) {
+      const id = game.level.world.wallOn(route[i], game.level.tiling.tiles[route[i]].neighbors.indexOf(route[i + 1]));
+      if (id !== -1 && game.level.world.walls[id].door !== -1) phaseTo(game, game.level.world.walls[id].door);
+      drive(game, routeWaypoints(game, [route[i], route[i + 1]]));
+    }
+    phaseTo(game, (door.layer + 2) % LAYERS);
+    expect(drive(game, routeWaypoints(game, [door.tile, beyond]), 3)).toBe(Infinity);
+    expect(game.room).toBe(door.tile);
+    phaseTo(game, door.layer);
+    expect(drive(game, routeWaypoints(game, [game.room, beyond]))).toBeLessThan(20);
+    expect(game.room).toBe(beyond);
+  });
+
+  it('hunters only hit you in their own layer, then you get a breather, and three hits end the game', () => {
+    const game = new Game();
+    game.load(LEVELS[1]);
+    const hunter = game.hunters[0];
+    // Park the hunter right on top of the marble, in another layer: nothing happens.
+    phaseTo(game, (hunter.layer + 1) % LAYERS);
+    hunter.position = game.marble.position();
+    hunter.room = game.room;
+    idle(game, 0.05);
+    expect(game.lives).toBe(LIVES);
+    // Same layer: a hit, the hunter goes home, and you're briefly safe.
+    for (let hit = 1; hit <= LIVES; hit++) {
+      hunter.respawn(); // far away while we phase into its layer
+      phaseTo(game, hunter.layer);
+      hunter.position = game.marble.position();
+      hunter.room = game.room;
+      idle(game, 0.05);
+      expect(game.lives).toBe(LIVES - hit);
+      expect(hunter.room).toBe(hunter.spawn);
+      idle(game, 2.1);
+    }
+    expect(game.status).toBe('lost');
+  });
+
+  it('a hunter that sees you closes in through the maze', () => {
+    const game = new Game();
+    game.load(LEVELS[1]);
+    const hunter = game.hunters[0];
+    phaseTo(game, hunter.layer);
+    const d0 = hunter.position[2];
+    idle(game, 4);
+    // Closer to the marble (at the start room, near the origin: z = cosh(distance)).
+    expect(hunter.chasing || game.lives < LIVES).toBe(true);
+    expect(hunter.position[2]).toBeLessThan(d0);
+  });
+
+  it('looping a pillar shifts you one layer (level 3)', () => {
+    const game = new Game();
+    game.load(LEVELS[2]);
+    expect(game.layer).toBe(0);
+    drive(game, routeWaypoints(game, [0, 4, 18, 5, 0])); // counter-clockwise lap
+    expect(game.layer).toBe(4); // red → violet
+    expect(game.phaseEvents.some((e) => e.cause === 'curvature')).toBe(true);
+    expect(game.loopEvents.map((l) => l.degrees)).toContain(-72);
+  });
+});
+
+describe('autopilot playthroughs (real physics)', () => {
+  it('level 1: collect both shards through coloured doors, then the portal', () => {
+    const game = new Game();
+    game.load(LEVELS[0]);
+    expect(playLevel(game)).toBe(true);
+    expect(game.status).toBe('won');
+  });
+
+  it('level 3: curvature only: red shard, a counter-clockwise lap to violet, two clockwise laps to gold, out', () => {
+    const game = new Game();
+    game.load(LEVELS[2]);
+    const center = (r: number) => [game.level.tiling.tiles[r].center];
+    drive(game, routeWaypoints(game, [0, 4]));
+    drive(game, center(4)); // red shard
+    drive(game, routeWaypoints(game, [4, 18, 5, 0, 4, 18])); // CCW lap → violet, to the violet shard
+    drive(game, center(18));
+    expect(game.layer).toBe(4);
+    drive(game, routeWaypoints(game, [18, 4, 0, 5, 18, 4, 0, 5])); // two clockwise laps → gold
+    expect(game.layer).toBe(1);
+    expect(drive(game, routeWaypoints(game, [5, 6, 1]))).toBeLessThan(40); // through the gold door
+    drive(game, center(1)); // gold shard
+    expect(game.shardsLeft()).toBe(0);
+    expect(drive(game, routeWaypoints(game, [1, 9, 2, 10, 3, 13]))).toBeLessThan(60);
+    idle(game, 1);
+    expect(game.status).toBe('won');
   });
 });

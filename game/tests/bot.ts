@@ -1,8 +1,10 @@
-// Test helpers built on the game's autopilot: drive a route, twist, idle.
+// Test helpers built on the game's autopilot: drive a route, phase, idle,
+// and a simple solver-bot that plays a whole level.
 
 import type { Game } from '../src/game/game';
 import type { InputSource } from '../src/input/InputSource';
 import { Autopilot, shortestRoute, waypoints } from '../src/game/autopilot';
+import { LAYERS, mod } from '../src/game/phase';
 import type { Vec3 } from '../src/math/lorentz';
 
 export { shortestRoute, waypoints };
@@ -19,7 +21,8 @@ export function drive(game: Game, points: Vec3[], perPointLimit = 8): number {
     game.update(dt, pilot);
     pilot.update();
     elapsed += dt;
-    if (elapsed > perPointLimit * points.length) return Infinity;
+    if (game.status === 'won') return elapsed;
+    if (elapsed > perPointLimit * points.length || game.status === 'lost') return Infinity;
   }
   return elapsed;
 }
@@ -29,30 +32,61 @@ export function routeWaypoints(game: Game, rooms: number[]): Vec3[] {
   return waypoints(game, rooms);
 }
 
-const quiet = (rates: [number, number, number], toggle: () => boolean): InputSource => ({
+const quiet = (steps: () => number): InputSource => ({
   tilt: () => ({ x: 0, y: 0 }),
-  angularVelocity: () => rates,
-  twistToggled: toggle,
-  resetKey: () => false,
+  phaseSteps: steps,
+  phaseRate: () => 0,
   status: () => ({ label: 'bot', connected: true }),
 });
 
-/** Enters twist mode, twists at the given XW/YW/ZW rates for `seconds`, and leaves twist mode. */
-export function twist(game: Game, rates: [number, number, number], seconds: number): void {
-  let toggle = true;
-  const take = () => {
-    const t = toggle;
-    toggle = false;
-    return t;
-  };
-  const dt = 1 / 60;
-  for (let t = 0; t < seconds - 1e-9; t += dt) game.update(dt, quiet(rates, take));
-  toggle = true;
-  game.update(dt, quiet([0, 0, 0], take));
-  if (game.twistMode) throw new Error('bot: failed to leave twist mode');
-}
-
 /** Lets the simulation run with no input for `seconds`. */
 export function idle(game: Game, seconds: number): void {
-  for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60, quiet([0, 0, 0], () => false));
+  for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60, quiet(() => 0));
+}
+
+/** Steps the phase until the marble is in `layer` (shortest way round), then lets it settle. */
+export function phaseTo(game: Game, layer: number): void {
+  let diff = mod(layer - game.layer, LAYERS);
+  if (diff > LAYERS / 2) diff -= LAYERS;
+  let pending = diff;
+  game.update(1 / 60, quiet(() => {
+    const n = pending;
+    pending = 0;
+    return n;
+  }));
+  idle(game, 0.4);
+}
+
+/**
+ * Plays a level with twisting allowed: visits every shard (nearest first),
+ * then the exit, phasing to each door's colour before going through it and
+ * to each shard's colour on arrival. Ignores hunters (use levels without
+ * them, or accept the risk).
+ */
+export function playLevel(game: Game): boolean {
+  const { tiling, world } = game.level;
+  const targets = [...game.level.spec.shards.map((s) => s.tile)];
+  while (game.status === 'playing') {
+    const remaining = game.shards.filter((s) => !s.collected).map((s) => s.spec);
+    const next = remaining.length > 0
+      ? remaining.sort((a, b) => shortestRoute(game, game.room, a.tile).length - shortestRoute(game, game.room, b.tile).length)[0]
+      : null;
+    const goal = next ? next.tile : game.level.spec.exit;
+    const route = shortestRoute(game, game.room, goal);
+    for (let i = 0; i + 1 < route.length; i++) {
+      const id = world.wallOn(route[i], tiling.tiles[route[i]].neighbors.indexOf(route[i + 1]));
+      if (id !== -1 && world.walls[id].door !== -1) phaseTo(game, world.walls[id].door);
+      if (drive(game, routeWaypoints(game, [route[i], route[i + 1]])) === Infinity) return false;
+    }
+    if (next) {
+      phaseTo(game, next.layer);
+      if (drive(game, [tiling.tiles[next.tile].center]) === Infinity) return false;
+      idle(game, 0.2);
+    } else {
+      idle(game, 1);
+      return (game.status as string) === 'won';
+    }
+    if (targets.length > 50) return false;
+  }
+  return game.status === 'won';
 }

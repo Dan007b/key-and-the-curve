@@ -21,8 +21,8 @@ export interface Wall {
   /** World endpoints (the edge's vertices). */
   a: Vec3;
   b: Vec3;
-  /** Index into the level's gates if this wall is a gate, else −1. */
-  gate: number;
+  /** The layer this door is open in, or −1 for a solid wall (closed in every layer). */
+  door: number;
 }
 
 export interface Post {
@@ -45,41 +45,44 @@ export interface World {
   roomPosts: number[][];
 }
 
-export interface GateEdge {
+export interface DoorEdge {
   tile: number;
   edge: number;
+  /** The one layer of the fourth dimension in which this door is open. */
+  layer: number;
 }
 
 /**
- * Builds walls on every room edge that is not an open passage, gates on the
+ * Builds walls on every room edge that is not an open passage, doors on the
  * listed edges (which must be open passages), and a post on every vertex of
  * every room. Posts matter beyond looks: they stop the marble rolling over a
  * vertex, so which side of each pillar a path went is always well defined,
  * which is what the key's holonomy counts (see transport.ts).
  */
-export function buildWorld(tiling: Tiling, maze: Maze, gates: readonly GateEdge[]): World {
+export function buildWorld(tiling: Tiling, maze: Maze, doors: readonly DoorEdge[]): World {
   const { tiles } = tiling;
   const p = tiling.metrics.p;
   const walls: Wall[] = [];
   const wallIds = new Map<number, number>(); // tile * p + edge → wall id, both sides
 
-  const gateAt = (tile: number, edge: number): number => {
+  const doorAt = (tile: number, edge: number): number => {
     const j = tiles[tile].neighbors[edge];
-    return gates.findIndex((g) => (g.tile === tile && g.edge === edge) || (g.tile === j && tiles[j]?.neighbors[g.edge] === tile));
+    const d = doors.find((g) => (g.tile === tile && g.edge === edge) || (g.tile === j && tiles[j]?.neighbors[g.edge] === tile));
+    return d ? d.layer : -1;
   };
 
   for (const i of maze.rooms) {
     tiles[i].neighbors.forEach((j, k) => {
       const jIsRoom = j !== -1 && maze.isRoom[j] === 1;
       if (jIsRoom && j < i) return; // the lower index owns shared walls
-      const gate = jIsRoom ? gateAt(i, k) : -1;
+      const door = jIsRoom ? doorAt(i, k) : -1;
       const open = jIsRoom && maze.open.has(passageKey(i, j));
-      if (open && gate === -1) return;
-      if (gate !== -1 && !open) {
-        throw new Error(`level: gate on tiles ${i}/${j} is not an open passage`);
+      if (open && door === -1) return;
+      if (door !== -1 && !open) {
+        throw new Error(`level: door on tiles ${i}/${j} is not an open passage`);
       }
       const id = walls.length;
-      walls.push({ tile: i, edge: k, a: tiles[i].vertices[k], b: tiles[i].vertices[(k + 1) % p], gate });
+      walls.push({ tile: i, edge: k, a: tiles[i].vertices[k], b: tiles[i].vertices[(k + 1) % p], door });
       wallIds.set(i * p + k, id);
       if (j !== -1) wallIds.set(j * p + tiles[i].neighborEdges[k], id);
     });

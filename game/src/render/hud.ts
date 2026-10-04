@@ -1,22 +1,28 @@
 /**
  * Heads-up display: plain DOM over the canvas (crisp text, no GPU cost).
- * Level title and hint, FPS, input status, ROLL/TWIST mode, the key's
- * holonomy, the gate lock panel, buttons and overlay cards.
+ * Level title and hint, lives, shards, timer, your layer, the phase ring
+ * around the 4D inset, a danger vignette, buttons and overlay cards.
  */
 
 import type { InputStatus } from '../input/InputSource';
-import { LockPanel } from './lockPanel';
-import type { LockView } from './lockPanel';
+import { LAYERS, LAYER_CSS, LAYER_DEG, LAYER_NAMES } from '../game/phase';
 
 export interface HudState {
   fps: number;
   inputs: InputStatus[];
-  twistMode: boolean;
+  layer: number;
+  /** Continuous phase (twist + curvature), degrees: drives the ring's pointer. */
+  phaseDeg: number;
+  /** Whole layers of curvature picked up from loops (signed). */
+  curvatureSteps: number;
   twistAllowed: boolean;
-  /** Key holonomy in degrees, relative to the direct route. */
-  holonomyDeg: number;
-  /** The nearest gate's lock, or null if no gate is near. */
-  lock: LockView | null;
+  lives: number;
+  maxLives: number;
+  shards: { layer: number; collected: boolean }[];
+  hunterLayers: number[];
+  time: number;
+  /** 0..1 how close a hunter in your layer is. */
+  danger: number;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, parent: HTMLElement, text?: string): HTMLElementTagNameMap[K] {
@@ -27,6 +33,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, pa
   return e;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** SVG arc path for a ring sector between angles a0..a1 (degrees, clockwise from the top). */
+function sector(r0: number, r1: number, a0: number, a1: number): string {
+  const pt = (r: number, a: number) => {
+    const t = ((a - 90) * Math.PI) / 180;
+    return `${(50 + r * Math.cos(t)).toFixed(2)},${(50 + r * Math.sin(t)).toFixed(2)}`;
+  };
+  return `M${pt(r1, a0)} A${r1},${r1} 0 0 1 ${pt(r1, a1)} L${pt(r0, a1)} A${r0},${r0} 0 0 0 ${pt(r0, a0)} Z`;
+}
+
 export class Hud {
   readonly root: HTMLDivElement;
   readonly buttons: HTMLDivElement;
@@ -34,36 +51,55 @@ export class Hud {
   private readonly hint: HTMLDivElement;
   private readonly fps: HTMLDivElement;
   private readonly status: HTMLDivElement;
-  private readonly mode: HTMLDivElement;
-  private readonly holonomy: HTMLDivElement;
-  private lockPanel!: LockPanel;
-  private readonly insetHint: HTMLDivElement;
+  private readonly layerPill: HTMLDivElement;
+  private readonly curvature: HTMLDivElement;
+  private readonly lives: HTMLDivElement;
+  private readonly shards: HTMLDivElement;
+  private readonly timer: HTMLDivElement;
+  private readonly vignette: HTMLDivElement;
+  private readonly ring: SVGSVGElement;
+  private readonly pointer: SVGGElement;
+  private readonly ringMarks: SVGGElement;
   private readonly overlay: HTMLDivElement;
-  private readonly inset: HTMLDivElement;
   private readonly toast: HTMLDivElement;
   private toastTimer = 0;
   private overlayAction: (() => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'hud', parent);
+    this.vignette = el('div', 'danger-vignette', this.root);
     const left = el('div', 'hud-left', this.root);
     this.title = el('div', 'hud-title', left);
     this.hint = el('div', 'hud-hint', left);
+    const center = el('div', 'hud-center', this.root);
+    this.lives = el('div', 'hud-lives', center);
+    this.shards = el('div', 'hud-shards', center);
+    this.timer = el('div', 'hud-timer', center);
     const right = el('div', 'hud-right', this.root);
     this.fps = el('div', 'hud-fps', right);
     this.status = el('div', 'hud-status', right);
-    this.mode = el('div', 'hud-mode', right);
-    this.holonomy = el('div', 'hud-holonomy', right);
+    this.layerPill = el('div', 'hud-layer', right);
+    this.curvature = el('div', 'hud-curvature', right);
     this.buttons = el('div', 'hud-buttons', this.root);
-    this.inset = el('div', 'hud-inset', this.root);
-    el('div', 'hud-inset-label', this.inset, '4D key');
-    this.insetHint = el('div', 'inset-hint', this.inset);
-    const legend = el('div', 'hud-inset-legend', this.inset);
-    for (const [axis, cls] of [['x', 'ax-x'], ['y', 'ax-y'], ['z', 'ax-z'], ['w', 'ax-w']]) el('span', cls, legend, axis);
-    el('span', 'ax-bit', legend, '● bit');
+
+    // The 4D inset frame, with the phase ring drawn around it.
+    const inset = el('div', 'hud-inset', this.root);
+    el('div', 'hud-inset-label', inset, 'Your 4D body');
+    this.ring = document.createElementNS(SVG_NS, 'svg');
+    this.ring.setAttribute('viewBox', '0 0 100 100');
+    this.ring.classList.add('phase-ring');
+    let svg = '';
+    for (let i = 0; i < LAYERS; i++) {
+      const a = i * LAYER_DEG;
+      svg += `<path d="${sector(41, 47, a - LAYER_DEG / 2 + 1.5, a + LAYER_DEG / 2 - 1.5)}" fill="${LAYER_CSS[i]}" class="ring-sector" data-layer="${i}"/>`;
+    }
+    this.ring.innerHTML = svg + '<g class="ring-marks"></g><g class="ring-pointer"><path d="M50,1.5 L46.2,8.5 L53.8,8.5 Z" fill="#fff"/></g>';
+    this.ringMarks = this.ring.querySelector('.ring-marks') as SVGGElement;
+    this.pointer = this.ring.querySelector('.ring-pointer') as SVGGElement;
+    inset.appendChild(this.ring);
+
     this.toast = el('div', 'hud-toast hidden', this.root);
     this.overlay = el('div', 'overlay hidden', parent);
-
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Enter' && this.overlayAction) {
         e.preventDefault();
@@ -83,18 +119,20 @@ export class Hud {
     return b;
   }
 
-  /** Positions the frame drawn around the key inset (size in CSS px). */
+  /** Positions the frame drawn around the inset (size in CSS px). */
   setInset(size: number, margin: number): void {
     this.root.style.setProperty('--inset-size', `${size}px`);
     this.root.style.setProperty('--inset-margin', `${margin}px`);
   }
 
   /** Shows a short message in the middle of the screen for a moment. */
-  flash(text: string): void {
+  flash(text: string, color = 'var(--good)'): void {
     this.toast.textContent = text;
+    this.toast.style.borderColor = color;
+    this.toast.style.color = color;
     this.toast.classList.remove('hidden');
     window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toast.classList.add('hidden'), 1600);
+    this.toastTimer = window.setTimeout(() => this.toast.classList.add('hidden'), 1500);
   }
 
   setLevel(index: number, name: string, hint: string): void {
@@ -115,17 +153,41 @@ export class Hud {
       }
       line.textContent = text;
     }
-    this.mode.textContent = !s.twistAllowed ? 'ROLL · twist disabled' : s.twistMode ? 'TWIST' : 'ROLL';
-    this.mode.className = `hud-mode ${s.twistMode ? 'twist' : 'roll'}`;
-    const h = Math.round(s.holonomyDeg);
-    this.holonomy.textContent = `Curvature has turned the key ${h > 0 ? '+' : ''}${h}°`;
-    this.lockPanel?.update(s.lock);
-    this.insetHint.textContent = s.lock ? 'halo = what the lock needs\nline: bit → its slot' : '';
-  }
 
-  /** Creates the gate lock panel; `onHelp` opens the explanation. */
-  createLockPanel(onHelp: () => void): void {
-    this.lockPanel = new LockPanel(this.root, onHelp);
+    this.layerPill.textContent = `${LAYER_NAMES[s.layer]} layer${s.twistAllowed ? '' : ' · twist jammed'}`;
+    this.layerPill.style.background = LAYER_CSS[s.layer];
+    const c = s.curvatureSteps;
+    this.curvature.textContent = c === 0 ? 'Curvature shift: none' : `Curvature shift: ${c > 0 ? '+' : ''}${c} layer${Math.abs(c) > 1 ? 's' : ''} (${c * LAYER_DEG > 0 ? '+' : ''}${c * LAYER_DEG}°)`;
+
+    this.lives.textContent = '♥'.repeat(Math.max(0, s.lives)) + '♡'.repeat(Math.max(0, s.maxLives - s.lives));
+    this.shards.innerHTML = '';
+    for (const sh of s.shards) {
+      const d = el('span', sh.collected ? 'shard got' : 'shard', this.shards, '◆');
+      d.style.color = LAYER_CSS[sh.layer];
+    }
+    const secs = Math.floor(s.time);
+    this.timer.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+
+    this.vignette.style.opacity = String(Math.min(1, s.danger * 1.1));
+
+    // Phase ring: pointer at your phase; marks for hunters (dots) and shards (diamonds) in each layer.
+    this.pointer.setAttribute('transform', `rotate(${s.phaseDeg.toFixed(1)} 50 50)`);
+    let marks = '';
+    for (let i = 0; i < LAYERS; i++) {
+      const a = ((i * LAYER_DEG - 90) * Math.PI) / 180;
+      const hunters = s.hunterLayers.filter((l) => l === i).length;
+      const shards = s.shards.filter((sh) => !sh.collected && sh.layer === i).length;
+      const x = 50 + 35 * Math.cos(a);
+      const y = 50 + 35 * Math.sin(a);
+      const parts: string[] = [];
+      for (let k = 0; k < hunters; k++) parts.push(`<circle cx="${(x - 4 + k * 4).toFixed(1)}" cy="${(y - 2).toFixed(1)}" r="1.7" fill="${LAYER_CSS[i]}" stroke="#000" stroke-width="0.6"/>`);
+      for (let k = 0; k < shards; k++) parts.push(`<rect x="${(x - 3.5 + k * 4).toFixed(1)}" y="${(y + 1).toFixed(1)}" width="2.6" height="2.6" transform="rotate(45 ${(x - 2.2 + k * 4).toFixed(1)} ${(y + 2.3).toFixed(1)})" fill="${LAYER_CSS[i]}"/>`);
+      marks += parts.join('');
+    }
+    this.ringMarks.innerHTML = marks;
+    for (const p of this.ring.querySelectorAll<SVGPathElement>('.ring-sector')) {
+      p.style.opacity = Number(p.dataset.layer) === s.layer ? '1' : '0.35';
+    }
   }
 
   /** Shows a centred card with a title, body text and one action (also Enter). */

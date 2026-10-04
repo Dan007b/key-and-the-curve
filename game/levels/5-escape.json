@@ -1,0 +1,78 @@
+{
+  "name": "Escape",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 3,
+  "seed": 5,
+  "extraOpenings": 5,
+  "start": 0,
+  "exit": 59,
+  "doors": [
+    {
+      "tile": 3,
+      "edge": 3,
+      "layer": 4
+    },
+    {
+      "tile": 31,
+      "edge": 2,
+      "layer": 1
+    },
+    {
+      "tile": 7,
+      "edge": 3,
+      "layer": 2
+    },
+    {
+      "tile": 18,
+      "edge": 0,
+      "layer": 0
+    }
+  ],
+  "shards": [
+    {
+      "tile": 22,
+      "layer": 1
+    },
+    {
+      "tile": 52,
+      "layer": 0
+    },
+    {
+      "tile": 23,
+      "layer": 4
+    },
+    {
+      "tile": 32,
+      "layer": 3
+    },
+    {
+      "tile": 35,
+      "layer": 0
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 9,
+      "layer": 0
+    },
+    {
+      "tile": 24,
+      "layer": 1
+    },
+    {
+      "tile": 39,
+      "layer": 2
+    },
+    {
+      "tile": 53,
+      "layer": 3
+    }
+  ],
+  "hunterSpeed": 1,
+  "par": 200,
+  "intro": "The final maze. Four hunters fill four of the five slices; only violet is quiet, but the doors and shards will not let you hide there for long. Loops around pillars shift you too, so mind your path.",
+  "hint": "Four hunters, five dimensions. Only violet is empty."
+}

@@ -1,0 +1,38 @@
+{
+  "name": "Slip",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 2,
+  "seed": 2,
+  "extraOpenings": 1,
+  "start": 0,
+  "exit": 18,
+  "doors": [
+    {
+      "tile": 14,
+      "edge": 1,
+      "layer": 3
+    },
+    {
+      "tile": 9,
+      "edge": 4,
+      "layer": 1
+    }
+  ],
+  "shards": [
+    {
+      "tile": 19,
+      "layer": 3
+    },
+    {
+      "tile": 12,
+      "layer": 0
+    }
+  ],
+  "hunters": [],
+  "par": 60,
+  "intro": "The maze exists in four dimensions. You see one slice of it at a time, one colour. Doors are open only in their own colour, and shards can only be grabbed in theirs. Press Q or E (or turn the controller like a dial) to slide through the fourth dimension. Collect both shards, then roll into the portal.",
+  "hint": "Doors open only in their own colour. Q / E (or turn the controller) to phase."
+}

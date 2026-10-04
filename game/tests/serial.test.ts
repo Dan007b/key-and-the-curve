@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TILT, DEFAULT_TWIST_MAPPING, LineSplitter, mapTwist, parseLine, tiltFromGravity } from '../src/input/serialProtocol';
+import { DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate } from '../src/input/serialProtocol';
 
 const GOOD = '$,0.99994,-0.00412,0.00897,0.00015,0.07,-0.17,9.80,0.0011,-0.0022,0.0000,3333,1';
 
@@ -118,9 +118,15 @@ describe('recorded controller output', () => {
   });
 });
 
-describe('mapTwist', () => {
-  it('maps sensor axes to the XW, YW, ZW planes with signs', () => {
-    expect(mapTwist([1, 2, 3], DEFAULT_TWIST_MAPPING)).toEqual([1, 2, 3]);
-    expect(mapTwist([1, 2, 3], { axes: [2, 0, 1], signs: [-1, 1, 1] })).toEqual([-3, 1, 2]);
+describe('yawRate (turning the controller like a dial)', () => {
+  it('measures rotation about the level vertical, whatever way up the board is', () => {
+    expect(yawRate([0, 0, 1.2], [0, 0, 9.8])).toBeCloseTo(1.2, 12);
+    // Board held upright (its y axis is up): the dial axis is y.
+    expect(yawRate([0, -0.9, 0], [0, 9.8, 0])).toBeCloseTo(-0.9, 12);
+  });
+
+  it('ignores tilting and small wobbles', () => {
+    expect(yawRate([1.5, -1.0, 0], [0, 0, 9.8])).toBe(0);
+    expect(yawRate([0, 0, 0.2], [0, 0, 9.8])).toBe(0);
   });
 });

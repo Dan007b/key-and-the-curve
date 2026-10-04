@@ -1,8 +1,8 @@
-// Entry point: wires the game, the views, the HUD, sound and the inputs together.
+// Phase Escape entry point: wires the game, the views, the HUD, sound and the inputs together.
 
 import './style.css';
 import { apply, lorentzInverse } from './math/lorentz';
-import type { Vec3 } from './math/lorentz';
+import type { Mat3, Vec3 } from './math/lorentz';
 import { toPoincare } from './math/poincare';
 import { DiskView } from './render/diskView';
 import type { ViewState } from './render/diskView';
@@ -11,12 +11,11 @@ import { KeyView } from './render/keyView';
 import { KeyboardInput } from './input/KeyboardInput';
 import { SerialInput } from './input/SerialInput';
 import { CombinedInput } from './input/CombinedInput';
-import { FIT_SCALE, Game } from './game/game';
+import { Game, LIVES } from './game/game';
 import { LEVELS } from './game/level';
+import { LAYER_CSS, LAYER_NAMES, LAYER_RGB, holonomySteps } from './game/phase';
+import { Autopilot, waypoints } from './game/autopilot';
 import { Sound } from './audio';
-import { lockExplainer } from './render/explainer';
-import { Autopilot, shortestRoute, waypoints } from './game/autopilot';
-import { identity4 } from './math/four';
 import { loadSettings, saveSettings, settingsForm } from './settings';
 import type { Settings } from './settings';
 
@@ -34,7 +33,6 @@ const serial = new SerialInput();
 const input = new CombinedInput(keyboard, serial);
 const game = new Game();
 const keyView = new KeyView();
-hud.createLockPanel(() => showLockExplainer());
 const sound = new Sound();
 const INSET_MARGIN = 16;
 let insetSize = 240;
@@ -43,82 +41,24 @@ let settings = loadSettings();
 let levelIndex = 0;
 let paused = true;
 let markedPosts = new Set<number>();
-/** Pillars to pulse after a loop closes, with the time (s) their highlight ends. */
+/** Pillars to pulse after a loop closes, with the game time their highlight ends. */
 const loopPillars = new Map<number, number>();
-/** Whether the level 3 explanation has been shown this session. */
+/** One-time explanation of curvature phasing (this session). */
 let ahaShown = false;
-let wasTwisting = false;
-/** One-time teaching moments this session. */
-let lockExplained = false;
-let twistHinted = false;
-
-// ---- Demo: level 3 plays itself --------------------------------------------------
-
-type DemoStep = { route: number[] } | { toGoal: true } | { wait: number };
-const DEMO_LEVEL = 2;
-const DEMO_STEPS: DemoStep[] = [
-  // Straight to the gate: no curvature turn, so the key does not fit.
-  { route: [0, 4, 18, 5] },
-  { wait: 2 },
-  // Back and once round the glowing pillar, counter-clockwise: −72°.
-  { route: [5, 0, 4, 18, 5] },
-  { wait: 1.5 },
-  { toGoal: true },
-];
-let demo: { pilot: Autopilot; step: number; started: boolean; wait: number } | null = null;
-
-function startDemo(): void {
-  ahaShown = false;
-  startLevel(DEMO_LEVEL);
-  hud.hideCard();
-  paused = false;
-  demo = { pilot: new Autopilot(game), step: 0, started: false, wait: 0 };
-  hud.flash('DEMO · press any key to take over');
-}
-
-function stopDemo(): void {
-  if (demo) hud.flash('YOUR TURN');
-  demo = null;
-}
-
-/** Advances the demo script; returns the input to use this frame. */
-function demoInput(dt: number): Autopilot | null {
-  if (!demo) return null;
-  const s = DEMO_STEPS[demo.step];
-  if (!s) {
-    demo = null;
-    return null;
-  }
-  if (!demo.started) {
-    demo.started = true;
-    if ('route' in s) demo.pilot.setPoints(waypoints(game, s.route));
-    if ('toGoal' in s) demo.pilot.setPoints(waypoints(game, shortestRoute(game, game.room, game.level.spec.goal)));
-    if ('wait' in s) demo.wait = s.wait;
-  }
-  demo.pilot.update();
-  const finished = 'wait' in s ? (demo.wait -= dt) <= 0 : demo.pilot.done();
-  if (finished) {
-    demo.step++;
-    demo.started = false;
-  }
-  return demo.pilot;
-}
 
 /** Pushes settings into the game and the controller input, and remembers them. */
 function applySettings(s: Settings): void {
   settings = s;
   game.settings.marble.damping = s.damping;
-  game.settings.tolerance = s.tolerance;
   serial.tiltSettings = { fullTiltDeg: s.fullTiltDeg, deadzone: s.deadzone, invertX: s.invertX, invertY: s.invertY, swapXY: s.swapXY };
-  serial.twistMapping = { axes: [...s.twistAxes], signs: s.twistInvert.map((inv) => (inv ? -1 : 1)) as [number, number, number] };
+  serial.phaseGain = s.phaseGain;
+  serial.phaseInvert = s.phaseInvert;
   sound.enabled = s.sound;
-  game.settings.assist = s.assist;
-  serial.onePlaneAtATime = s.onePlane;
   saveSettings(s);
 }
 applySettings(settings);
 
-function startLevel(index: number): void {
+function startLevel(index: number, showIntro = true): void {
   levelIndex = index;
   const spec = LEVELS[index];
   game.load(spec);
@@ -128,9 +68,11 @@ function startLevel(index: number): void {
   hud.clearLabels();
   hud.setLevel(index, spec.name, spec.hint);
   paused = true;
-  hud.showCard(`Level ${index + 1} · ${spec.name}`, spec.intro, 'Start', () => {
-    paused = false;
-  });
+  if (showIntro) {
+    hud.showCard(`Level ${index + 1} · ${spec.name}`, spec.intro, 'Start', () => {
+      paused = false;
+    });
+  }
 }
 
 /** Pauses with a card; resumes when it closes. */
@@ -155,33 +97,16 @@ function showLevels(): void {
   pauseWith('Levels', '', 'Close', grid);
 }
 
-/** What the 4D key is, what a twist does, and why matching opens the gate. */
-function showLockExplainer(): void {
-  lockExplained = true;
-  pauseWith(
-    'How the 4D lock works',
-    'Your key is a tesseract, a cube in four dimensions. The corner view shows its 3D shadow, the way a cube casts a 2D shadow. The big outer cube is the side of the key nearest you in the fourth direction (w), the small inner cube is the far side, and the gold edges run along w.\n' +
-      'In 4D, things turn in a plane rather than around an axis. A twist in the XW plane turns the x direction (red) into the w direction (gold), so the inner and outer cubes swap places along x. YW and ZW do the same for y and z.\n' +
-      'Each gate is a 4D lock with four dials. Three are the twist planes you control: Q/A, W/S and E/D, or twist the controller. The fourth is curvature, which only rolling around pillars can change. When every dial points straight up, the key matches the ghost and the gate opens. Get close and let go: the key settles in by itself.',
-    'Got it',
-    lockExplainer(),
-    true,
-  );
-}
-
 function showHelp(): void {
   const table = document.createElement('table');
   table.className = 'help-table';
   const rows: [string, string][] = [
-    ['Arrows / WASD / drag', 'Tilt the board to roll the marble'],
-    ['Space · BOOT button', 'Toggle twist mode (turn the key through 4D)'],
-    ['Q / A', 'Twist in the XW plane (in twist mode; or Shift+Q/A)'],
-    ['W / S', 'Twist in the YW plane'],
-    ['E / D', 'Twist in the ZW plane'],
-    ['R', 'Reset the key (undo all twists)'],
-    ['T', 'Show or hide the holonomy trail'],
-    ['M', 'Sound on or off'],
-    ['H', 'This help'],
+    ['Arrows / WASD / drag', 'Roll the marble (or tilt the controller)'],
+    ['Q / E', 'Phase down / up one layer through the fourth dimension'],
+    ['Space', 'Phase up one layer'],
+    ['Controller', 'Tilt to roll; turn it like a dial to phase; BOOT = phase up'],
+    ['R', 'Restart the level'],
+    ['T · M · H', 'Trail · sound · this help'],
   ];
   for (const [k, v] of rows) {
     const tr = table.insertRow();
@@ -190,8 +115,9 @@ function showHelp(): void {
   }
   pauseWith(
     'How to play',
-    'Roll the marble to the golden room. Magenta gates open only when the key, the tesseract in the corner, matches its ghost.\n' +
-      'You can turn the key two ways: twist it through the fourth dimension, or roll around a pillar and let the curvature of space turn it. Each lap around a pillar turns it 72°.',
+    'Grab every shard ◆, then roll into the portal. Hunters take a life when they touch you; lose three and you are caught.\n' +
+      'The maze has a fourth dimension: five layers, five colours. You exist in one at a time. Doors open only in their own colour, shards can only be grabbed in theirs, and hunters can only see and touch you in theirs. Phase to slip through doors and away from hunters.\n' +
+      'Space is curved here. Roll once around a pillar and you come back one layer over (clockwise = up, counter-clockwise = down): the curvature itself moves you through the fourth dimension.',
     'Close',
     table,
     true,
@@ -202,36 +128,79 @@ function showSettings(): void {
   pauseWith('Settings', '', 'Done', settingsForm(settings, applySettings), true);
 }
 
-/** The level 3 "aha" moment: what just happened to the key, with the angle-sum formula. */
-function showAha(degrees: number): void {
-  // During the demo the card closes itself after a while.
+/** The holonomy moment: the first time a loop shifts your layer. */
+function showAha(degrees: number, to: number): void {
   if (demo) window.setTimeout(() => hud.closeCard(), 9000);
   const formula = document.createElement('div');
   formula.className = 'formula';
-  formula.textContent = 'turn = area = (n − 2)·180° − Σ angles = 2·180° − 4·72° = 72°';
+  formula.textContent = 'turn = (4 − 2)·180° − 4·72° = 72° = one layer';
   pauseWith(
-    'Curvature turned your key',
-    `You rolled once around the pillar and came back, yet the key has turned ${Math.abs(degrees)}°, and so has the whole maze around you.\n` +
-      'The four rooms around a pillar form a square. In flat space its corners would be 90°, but in this curved space each one is only 72°. Carry anything around a closed path and it comes back turned by the area the path encloses:',
+    'Space just moved you through the fourth dimension',
+    `You rolled once around the pillar and came back ${LAYER_NAMES[to]}, without touching the controls. That lap turned you ${degrees > 0 ? '+' : ''}${degrees}°.\n` +
+      'The four rooms around a pillar form a square. In flat space its corners would be 90°, but in this curved space each is only 72°. Anything carried around a closed path comes back turned by the area it encloses:',
     'Back to the maze',
     formula,
   );
   const more = document.createElement('p');
   more.textContent =
-    'This is holonomy: in curved space, the path you take changes the object you carry. Go around the other way and it turns the other way; go around a whole tile (five pillars) and it turns a full 360°. Now take the key to the gate.';
+    'Five laps make 360°, a full trip around the fourth dimension. This is holonomy: in curved space, the path you take changes you. Clockwise laps go up a layer, counter-clockwise go down.';
   formula.after(more);
+}
+
+// ---- Demo: level 3 plays itself --------------------------------------------------
+
+/** Each step is a route through rooms, or a single room centre to roll to. */
+type DemoStep = { route: number[] } | { center: number };
+const DEMO_LEVEL = 2;
+const DEMO_STEPS: DemoStep[] = [
+  { route: [0, 4] },
+  { center: 4 }, // red shard
+  { route: [4, 18, 5, 0, 4, 18] }, // counter-clockwise lap: red → violet
+  { center: 18 }, // violet shard
+  { route: [18, 4, 0, 5, 18, 4, 0, 5] }, // two clockwise laps: violet → gold
+  { route: [5, 6, 1] }, // through the gold door
+  { center: 1 }, // gold shard
+  { route: [1, 9, 2, 10, 3, 13] }, // to the portal
+];
+let demo: { pilot: Autopilot; step: number; started: boolean } | null = null;
+
+function startDemo(): void {
+  ahaShown = false;
+  startLevel(DEMO_LEVEL, false);
+  paused = false;
+  demo = { pilot: new Autopilot(game), step: 0, started: false };
+  hud.flash('DEMO · press any key to take over', '#ffffff');
+}
+
+/** Advances the demo script; returns the input to use this frame. */
+function demoInput(): Autopilot | null {
+  if (!demo) return null;
+  const s = DEMO_STEPS[demo.step];
+  if (!s) {
+    demo = null;
+    return null;
+  }
+  if (!demo.started) {
+    demo.started = true;
+    demo.pilot.setPoints('route' in s ? waypoints(game, s.route) : [game.level.tiling.tiles[s.center].center]);
+  }
+  demo.pilot.update();
+  if (demo.pilot.done()) {
+    demo.step++;
+    demo.started = false;
+  }
+  return demo.pilot;
 }
 
 // ---- Buttons and keys ----------------------------------------------------------
 
 if (SerialInput.supported()) {
-  const connectButton = hud.button('Connect controller', 'Pick the ESP32 serial port (Chrome or Edge)', () => {
+  const connectButton = hud.button('Connect controller', 'Pick the ESP32 serial port', () => {
     if (serial.connected()) {
       void serial.disconnect();
       return;
     }
     serial.connect().catch((err: unknown) => {
-      // Cancelling the port picker is not an error worth shouting about.
       if (!(err instanceof DOMException && err.name === 'NotFoundError')) {
         pauseWith('Could not open the controller', `${String(err)}\nIs another program (a serial monitor) using the port?`, 'OK');
       }
@@ -243,25 +212,24 @@ if (SerialInput.supported()) {
   hud.button('Set level', 'Hold the controller the way you want "flat" to be, then click', () => {
     if (!serial.setLevel()) pauseWith('No controller data yet', 'Connect the controller first.', 'OK');
   });
-} else {
-  hud.button('Controller: use Chrome or Edge', 'Web Serial is not available in this browser', () => {});
 }
-hud.button('Reset key (R)', 'Undo all twists', () => {
-  game.key = identity4();
-});
-hud.button('Watch demo', 'Level 3 plays itself: the curvature trick', startDemo);
+hud.button('Watch demo', 'Level 3 plays itself: curvature moves you through the fourth dimension', startDemo);
 hud.button('Levels', 'Choose a level', showLevels);
-hud.button('Settings', 'Sensitivity, deadzone, twist mapping, tolerance', showSettings);
-hud.button('Help (H)', 'Controls', showHelp);
-hud.button('Restart', 'Restart this level', () => startLevel(levelIndex));
+hud.button('Settings', 'Controller feel, friction, trail, sound', showSettings);
+hud.button('Help (H)', 'How to play', showHelp);
+hud.button('Restart (R)', 'Restart this level', () => startLevel(levelIndex));
 
 window.addEventListener('keydown', (e) => {
   sound.unlock();
-  if (demo && !hud.cardVisible()) stopDemo();
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
+  if (demo && !hud.cardVisible()) {
+    demo = null;
+    hud.flash('YOUR TURN', '#ffffff');
+  }
   if (e.repeat) return;
   if (e.code === 'KeyH' && !hud.cardVisible()) showHelp();
+  if (e.code === 'KeyR' && !hud.cardVisible()) startLevel(levelIndex);
   if (e.code === 'KeyT') applySettings({ ...settings, trail: !settings.trail });
   if (e.code === 'KeyM') applySettings({ ...settings, sound: !settings.sound });
 });
@@ -269,7 +237,7 @@ window.addEventListener('pointerdown', () => sound.unlock());
 
 const resize = () => {
   view.resize(window.innerWidth, window.innerHeight);
-  insetSize = Math.round(Math.max(140, Math.min(270, Math.min(window.innerWidth, window.innerHeight) * 0.3)));
+  insetSize = Math.round(Math.max(140, Math.min(250, Math.min(window.innerWidth, window.innerHeight) * 0.28)));
   hud.setInset(insetSize, INSET_MARGIN);
 };
 window.addEventListener('resize', resize);
@@ -283,11 +251,14 @@ function viewState(): ViewState {
     if (until > game.time) highlight.add(id);
     else loopPillars.delete(id);
   }
+  const { tiles } = game.level.tiling;
   return {
     time: game.time,
-    twistMode: game.twistMode,
-    gateGlow: game.gates.map((_, i) => (game.gateReading?.index === i ? game.gateGlow() : 0)),
-    gateOpen: game.gates.map((g) => g.open),
+    layer: game.layer,
+    shards: game.shards.map((s) => ({ position: tiles[s.spec.tile].center, layer: s.spec.layer, collected: s.collected })),
+    hunters: game.hunters.map((h) => ({ position: h.position, layer: h.layer, chasing: h.chasing })),
+    exit: { position: tiles[game.level.spec.exit].center, open: game.exitOpen() },
+    invulnerable: game.invulnerable,
     highlightPosts: highlight,
     trail: settings.trail ? game.trail : null,
   };
@@ -296,7 +267,7 @@ function viewState(): ViewState {
 function draw(): void {
   const viewInverse = lorentzInverse(game.viewFrame());
   view.render(viewInverse, viewState());
-  keyView.update(game.key, game.gateReading?.ghost ?? null, performance.now() / 1000);
+  keyView.update(game.phaseDeg(), LAYER_RGB[game.layer], performance.now() / 1000);
   keyView.render(view.renderer, window.innerWidth - insetSize - INSET_MARGIN, INSET_MARGIN, insetSize);
   hud.updateLabels((anchor) => {
     const [x, y] = toPoincare(apply(viewInverse, anchor as Vec3));
@@ -310,51 +281,67 @@ function handleEvents(): void {
     sound.hit(game.lastImpact);
     game.lastImpact = 0;
   }
-  if (game.twistMode !== wasTwisting) {
-    sound.twist(game.twistMode);
-    if (game.twistMode && !twistHinted) {
-      twistHinted = true;
-      hud.flash('TWIST · follow the highlighted dial');
-    }
-    wasTwisting = game.twistMode;
-  }
-  for (const _ of game.openedEvents.splice(0)) {
-    sound.gateOpen();
-    hud.flash('GATE OPEN');
-  }
+  let lastLoopDegrees = 0;
   for (const loop of game.loopEvents.splice(0)) {
+    lastLoopDegrees = loop.degrees;
     sound.loop(loop.degrees);
-    const n = loop.pillars.length;
-    hud.addLabel(`${loop.degrees > 0 ? '+' : ''}${loop.degrees}°${n > 1 ? ` (${n} pillars)` : ''}`, loop.where);
+    const steps = Math.round(loop.degrees / 72);
+    hud.addLabel(`${loop.degrees > 0 ? '+' : ''}${loop.degrees}° · ${steps > 0 ? '+' : ''}${steps} layer`, loop.where);
     for (const id of loop.pillars) loopPillars.set(id, game.time + 4);
-    if (levelIndex === DEMO_LEVEL && !ahaShown && loop.degrees !== 0) {
+  }
+  for (const e of game.phaseEvents.splice(0)) {
+    sound.phase(e.to, e.cause === 'curvature');
+    hud.flash(e.cause === 'curvature' ? `CURVATURE → ${LAYER_NAMES[e.to].toUpperCase()}` : `→ ${LAYER_NAMES[e.to].toUpperCase()}`, LAYER_CSS[e.to]);
+    if (e.cause === 'curvature' && !ahaShown && levelIndex === DEMO_LEVEL) {
       ahaShown = true;
-      showAha(loop.degrees);
+      showAha(lastLoopDegrees, e.to);
     }
+  }
+  for (const _ of game.pickupEvents.splice(0)) {
+    if (game.exitOpen()) {
+      sound.portalOpen();
+      hud.flash('ALL SHARDS · PORTAL OPEN', '#ffffff');
+    } else {
+      sound.pickup();
+      hud.flash(`SHARD · ${game.shards.length - game.shardsLeft()}/${game.shards.length}`, '#ffffff');
+    }
+  }
+  if (game.hitEvents > 0) {
+    game.hitEvents = 0;
+    sound.hurt();
+    if (game.status !== 'lost') hud.flash(`HIT · ${game.lives} ${game.lives === 1 ? 'life' : 'lives'} left`, '#ff5a6e');
   }
 }
 
 function step(dt: number): void {
   input.update(dt);
-  keyboard.twistMode = game.twistMode;
   if (paused) return;
-  game.update(dt, demoInput(dt) ?? input);
-  input.vibrate(game.gateGlow());
+  game.update(dt, demoInput() ?? input);
+  input.vibrate(game.danger());
   handleEvents();
-  // The first time a gate is in reach, explain the 4D lock.
-  if (game.gateReading && !lockExplained && !demo && !paused) showLockExplainer();
-  if (game.completed) {
+  if (game.status === 'won') {
     paused = true;
+    demo = null;
     sound.complete();
+    const t = Math.round(game.time);
+    const par = game.level.spec.par;
+    const stars = game.lives === LIVES && t <= par ? 3 : t <= par * 1.5 ? 2 : 1;
     const last = levelIndex === LEVELS.length - 1;
     hud.showCard(
-      last ? 'You made it home' : 'Level complete',
-      last
-        ? 'You carried the key through curved space and the fourth dimension. Every twist and every loop you rolled is still in it.'
-        : `Solved in ${Math.round(game.time)} s.`,
+      last ? 'You escaped' : 'Level complete',
+      `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}   ${t} s (par ${par} s) · ${game.lives}/${LIVES} lives\n` +
+        (last ? 'You outran the hunters through five dimensions of curved space.' : ''),
       last ? 'Play again' : 'Next level',
       () => startLevel(last ? 0 : levelIndex + 1),
     );
+  } else if (game.status === 'lost') {
+    paused = true;
+    demo = null;
+    sound.caught();
+    hud.showCard('Caught', `The hunters got you after ${Math.round(game.time)} s. Phase out of their colour when they close in.`, 'Try again', () => startLevel(levelIndex, false));
+    window.setTimeout(() => {
+      if (!hud.cardVisible()) paused = false;
+    }, 0);
   }
 }
 
@@ -375,32 +362,27 @@ function tick(now: number): void {
   hud.update({
     fps,
     inputs: input.statuses(),
-    twistMode: game.twistMode,
+    layer: game.layer,
+    phaseDeg: game.phaseDeg(),
+    curvatureSteps: holonomySteps(game.holonomy()),
     twistAllowed: game.twistAllowed(),
-    holonomyDeg: ((game.gateReading?.holonomy ?? game.holonomy()) * 180) / Math.PI,
-    lock: game.gateReading
-      ? {
-          status: game.gateReading.lock,
-          fit: Math.max(0, 1 - game.gateReading.distance / FIT_SCALE),
-          threshold: 1 - game.settings.tolerance / FIT_SCALE,
-          twistMode: game.twistMode,
-          twistAllowed: game.twistAllowed(),
-          controllerConnected: serial.connected(),
-        }
-      : null,
+    lives: game.lives,
+    maxLives: LIVES,
+    shards: game.shards.map((s) => ({ layer: s.spec.layer, collected: s.collected })),
+    hunterLayers: game.hunters.map((h) => h.layer),
+    time: game.time,
+    danger: game.danger(),
   });
   requestAnimationFrame(tick);
 }
 
 /**
  * ?scene=… sets up a showcase state (used for the README screenshots):
- * title, gate (level 2 mid-twist), loop (level 3 just after a pillar lap),
- * final (level 5 at its first gate).
+ * title (level 1), doors (level 1 at a door), hunted (level 2 with a hunter
+ * closing in), curvature (level 3 just after a pillar lap), final (level 5).
  */
 function setupScene(scene: string): void {
-  // Showcase states skip the one-time teaching cards.
-  lockExplained = true;
-  twistHinted = true;
+  ahaShown = true;
   const drive = (rooms: number[]) => {
     const pilot = new Autopilot(game, waypoints(game, rooms));
     for (let t = 0; t < 60 && !pilot.done(); t += 1 / 60) {
@@ -408,32 +390,28 @@ function setupScene(scene: string): void {
       pilot.update();
     }
   };
-  const twistBy = (rates: [number, number, number], seconds: number) => {
-    const pilot = new Autopilot(game);
-    pilot.rates = rates;
-    pilot.toggleRequested = true;
-    for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60, pilot);
-  };
   const begin = (index: number) => {
-    startLevel(index);
+    startLevel(index, false);
     hud.hideCard();
     paused = false;
   };
   if (scene === 'title') begin(0);
-  if (scene === 'gate') {
-    begin(1);
-    drive([0, 4]);
-    twistBy([Math.PI / 2, 0, 0], 0.6);
+  if (scene === 'doors') {
+    begin(0);
+    drive([0, 4, 14]);
   }
-  if (scene === 'loop') {
-    ahaShown = true;
+  if (scene === 'hunted') {
+    begin(1);
+    for (let t = 0; t < 3.5; t += 1 / 60) game.update(1 / 60, new Autopilot(game));
+  }
+  if (scene === 'curvature') {
     begin(2);
     drive([0, 4, 18, 5, 0]);
     handleEvents();
   }
   if (scene === 'final') {
     begin(4);
-    drive([0, 4, 14, 3, 10]);
+    drive([0, 4, 14, 3]);
   }
 }
 
@@ -451,6 +429,22 @@ if (import.meta.env.DEV) {
   Object.assign(window, {
     __game: game,
     __demo: startDemo,
+    __start(index: number) {
+      startLevel(index, false);
+      paused = false;
+    },
+    /** Puts the marble at a room's centre, carried along the direct route. */
+    __teleport(room: number) {
+      const ref = game.level.references[room];
+      if (!ref) throw new Error(`room ${room} is not in the maze`);
+      game.marble.frame = [...ref] as Mat3;
+      game.marble.vel = [0, 0];
+      game.carry = [...ref] as Mat3;
+      game.room = room;
+      game.cameraOffset = 0;
+      game.rebuildColliders();
+      draw();
+    },
     /** Drives the marble through a room route with the autopilot (simulated time). */
     __drive(rooms: number[], maxSeconds = 60) {
       const pilot = new Autopilot(game, waypoints(game, rooms));
@@ -461,23 +455,6 @@ if (import.meta.env.DEV) {
       }
       draw();
       return pilot.done();
-    },
-    __start(index: number) {
-      startLevel(index);
-      hud.hideCard();
-      paused = false;
-    },
-    /** Puts the marble at a room's centre, carrying the key along the direct route. */
-    __teleport(room: number) {
-      const ref = game.level.references[room];
-      if (!ref) throw new Error(`room ${room} is not in the maze`);
-      game.marble.frame = [...ref] as typeof ref;
-      game.marble.vel = [0, 0];
-      game.carry = [...ref] as typeof ref;
-      game.room = room;
-      game.cameraOffset = 0;
-      game.rebuildColliders();
-      draw();
     },
     /** Advances the simulation by `seconds` in 60 Hz steps and redraws. */
     __advance(seconds: number) {

@@ -6,13 +6,14 @@
  *   circuit leaves the board running.
  * - Parses lines robustly (partial chunks, '#' debug lines, garbage dropped).
  * - Tilt comes from the gravity vector relative to a captured "level"
- *   reference (setLevel()); twist comes from the gyro; the BOOT button
- *   toggles twist mode on each press.
+ *   reference (setLevel()). Turning the controller about that vertical, like
+ *   a dial, slides you through the fourth dimension; each BOOT press steps
+ *   up one layer.
  */
 
 import type { InputSource, InputStatus } from './InputSource';
-import { DEFAULT_TILT, DEFAULT_TWIST_MAPPING, LineSplitter, dominantTwist, mapTwist, parseLine, tiltFromGravity } from './serialProtocol';
-import type { Sample, TiltSettings, TwistMapping } from './serialProtocol';
+import { DEFAULT_TILT, LineSplitter, parseLine, tiltFromGravity, yawRate } from './serialProtocol';
+import type { Sample, TiltSettings } from './serialProtocol';
 
 /** Must match kBaud in firmware/src/main.cpp. */
 export const BAUD = 921600;
@@ -34,10 +35,9 @@ const USB_VENDORS = [0x10c4, 0x1a86, 0x0403, 0x303a];
 
 export class SerialInput implements InputSource {
   tiltSettings: TiltSettings = { ...DEFAULT_TILT };
-  twistMapping: TwistMapping = { ...DEFAULT_TWIST_MAPPING };
-  /** Twist one plane at a time (the strongest wrist axis wins). */
-  onePlaneAtATime = true;
-  private activePlane = -1;
+  /** Degrees of phase per degree of controller turn (72° of phase is one layer). */
+  phaseGain = 1.2;
+  phaseInvert = false;
   /** Called with every '#' line from the board (for a debug console). */
   onDebugLine: ((line: string) => void) | null = null;
 
@@ -117,7 +117,7 @@ export class SerialInput implements InputSource {
     this.latest = s;
     this.recentGravity.push(s.gravity);
     if (this.recentGravity.length > 20) this.recentGravity.shift();
-    // Rising edge of the BOOT button toggles twist mode.
+    // Rising edge of the BOOT button: one layer up.
     if ((s.buttons & 1) === 1 && (this.lastButtons & 1) === 0) this.toggles++;
     this.lastButtons = s.buttons;
     const now = performance.now();
@@ -138,28 +138,18 @@ export class SerialInput implements InputSource {
     return tiltFromGravity(this.latest.gravity, this.reference, this.tiltSettings);
   }
 
-  angularVelocity(): [number, number, number] {
-    if (!this.latest) return [0, 0, 0];
-    const rates = mapTwist(this.latest.gyro, this.twistMapping);
-    if (!this.onePlaneAtATime) return rates;
-    const d = dominantTwist(rates, this.activePlane);
-    this.activePlane = d.active;
-    return d.rates;
+  /** Degrees per second through the fourth dimension, from turning the controller like a dial. */
+  phaseRate(): number {
+    if (!this.latest) return 0;
+    const w = yawRate(this.latest.gyro, this.reference);
+    return ((w * 180) / Math.PI) * this.phaseGain * (this.phaseInvert ? -1 : 1);
   }
 
-  /** The twist plane the controller is currently driving (0 = XW, 1 = YW, 2 = ZW), or −1. */
-  activeTwistPlane(): number {
-    return this.activePlane;
-  }
-
-  twistToggled(): boolean {
-    if (this.toggles === 0) return false;
-    this.toggles--;
-    return true;
-  }
-
-  resetKey(): boolean {
-    return false; // No reset button on the controller; R or the on-screen button.
+  /** One layer up per BOOT press. */
+  phaseSteps(): number {
+    const n = this.toggles;
+    this.toggles = 0;
+    return n;
   }
 
   status(): InputStatus {

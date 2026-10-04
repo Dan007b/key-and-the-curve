@@ -1,7 +1,7 @@
 /**
  * Merges keyboard/mouse and the controller so either can drive at any time.
- * Keyboard tilt wins while a tilt key is held; twist rates add; button
- * presses from either source count.
+ * Keyboard tilt wins while a tilt key is held; phase steps and rates from
+ * both sources add up.
  */
 
 import type { InputSource, InputStatus } from './InputSource';
@@ -21,23 +21,12 @@ export class CombinedInput implements InputSource {
     return this.serial.tilt();
   }
 
-  angularVelocity(): [number, number, number] {
-    const k = this.keyboard.angularVelocity();
-    const s = this.serial.angularVelocity();
-    return [k[0] + s[0], k[1] + s[1], k[2] + s[2]];
+  phaseSteps(): number {
+    return this.keyboard.phaseSteps() + this.serial.phaseSteps();
   }
 
-  twistToggled(): boolean {
-    // Evaluate both so neither source keeps a stale press queued.
-    const k = this.keyboard.twistToggled();
-    const s = this.serial.twistToggled();
-    return k || s;
-  }
-
-  resetKey(): boolean {
-    const k = this.keyboard.resetKey();
-    const s = this.serial.resetKey();
-    return k || s;
+  phaseRate(): number {
+    return this.keyboard.phaseRate() + this.serial.phaseRate();
   }
 
   status(): InputStatus {

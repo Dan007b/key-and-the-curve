@@ -1,0 +1,48 @@
+{
+  "name": "Hunted",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 2,
+  "seed": 5,
+  "extraOpenings": 2,
+  "start": 0,
+  "exit": 18,
+  "doors": [
+    {
+      "tile": 14,
+      "edge": 1,
+      "layer": 4
+    },
+    {
+      "tile": 9,
+      "edge": 4,
+      "layer": 1
+    }
+  ],
+  "shards": [
+    {
+      "tile": 19,
+      "layer": 2
+    },
+    {
+      "tile": 8,
+      "layer": 1
+    },
+    {
+      "tile": 13,
+      "layer": 3
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 9,
+      "layer": 0
+    }
+  ],
+  "hunterSpeed": 0.75,
+  "par": 75,
+  "intro": "Something lives in the red slice, and so do you. Hunters can only see and touch you while you share their colour; in any other slice they are harmless ghosts. Three hits and you are caught.",
+  "hint": "Hunters only see you in their own colour. Phase away!"
+}

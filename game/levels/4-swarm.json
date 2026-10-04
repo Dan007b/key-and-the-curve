@@ -1,0 +1,65 @@
+{
+  "name": "Swarm",
+  "tiling": [
+    5,
+    4
+  ],
+  "depth": 3,
+  "seed": 3,
+  "extraOpenings": 4,
+  "start": 0,
+  "exit": 59,
+  "doors": [
+    {
+      "tile": 14,
+      "edge": 2,
+      "layer": 1
+    },
+    {
+      "tile": 9,
+      "edge": 4,
+      "layer": 2
+    },
+    {
+      "tile": 5,
+      "edge": 0,
+      "layer": 4
+    }
+  ],
+  "shards": [
+    {
+      "tile": 22,
+      "layer": 2
+    },
+    {
+      "tile": 55,
+      "layer": 4
+    },
+    {
+      "tile": 39,
+      "layer": 2
+    },
+    {
+      "tile": 46,
+      "layer": 0
+    }
+  ],
+  "hunters": [
+    {
+      "tile": 10,
+      "layer": 0
+    },
+    {
+      "tile": 29,
+      "layer": 2
+    },
+    {
+      "tile": 50,
+      "layer": 3
+    }
+  ],
+  "hunterSpeed": 0.85,
+  "par": 150,
+  "intro": "Three hunters prowl three different slices. Every colour is safe somewhere and dangerous somewhere else. They get faster the longer you take.",
+  "hint": "Three hunters, three colours. Keep moving through the dimensions."
+}

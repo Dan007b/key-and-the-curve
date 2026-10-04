@@ -572,3 +572,88 @@ canvas {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+
+/* ---- Phase Escape HUD ---------------------------------------------------------- */
+
+.hud-center {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font: 700 16px ui-monospace, Consolas, monospace;
+}
+
+.hud-lives {
+  color: #ff5a6e;
+  letter-spacing: 3px;
+  font-size: 18px;
+}
+
+.hud-shards .shard {
+  font-size: 16px;
+  margin: 0 1px;
+  text-shadow: 0 0 6px currentColor;
+}
+
+.hud-shards .shard.got {
+  opacity: 0.25;
+  text-shadow: none;
+}
+
+.hud-timer {
+  color: var(--text);
+}
+
+.hud-layer {
+  margin-top: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: #0a0b12;
+  font: 800 13px 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.15);
+}
+
+.hud-curvature {
+  color: var(--text);
+}
+
+.phase-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ring-sector {
+  transition: opacity 120ms linear;
+}
+
+.ring-pointer {
+  transition: transform 60ms linear;
+}
+
+.danger-vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 30, 60, 0.45) 100%);
+  transition: opacity 120ms linear;
+}
+
+@media (max-width: 700px) {
+  .hud-center {
+    top: auto;
+    bottom: calc(var(--inset-size, 140px) + var(--inset-margin, 16px) + 90px);
+    font-size: 13px;
+    gap: 10px;
+  }
+}

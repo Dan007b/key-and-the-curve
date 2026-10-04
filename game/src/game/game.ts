@@ -1,71 +1,54 @@
 /**
- * Game state and the fixed-timestep simulation: marble, rooms, carried frame,
- * camera. Rendering and input live elsewhere; this module is plain logic and
- * runs headless in tests.
+ * Phase Escape: game state and the fixed-timestep simulation. Rendering and
+ * input live elsewhere; this module is plain logic and runs headless in tests.
+ *
+ * Collect every shard, then reach the exit portal, without being caught three
+ * times. The maze is layered in a fourth dimension (phase.ts): doors, shards
+ * and hunters each live in one layer, and you change layer by twisting, or by
+ * looping pillars and letting the curvature of space turn you.
  */
 
 import { angleBetween, carryAcross, wrapAngle } from './transport';
 import { Marble, DEFAULT_MARBLE } from './marble';
 import type { Collider, MarbleParams } from './marble';
 import { loadLevel } from './level';
-import type { LevelSpec, LoadedLevel } from './level';
+import type { LevelSpec, LoadedLevel, ShardSpec } from './level';
 import { POST_RADIUS, WALL_HALF_WIDTH } from './world';
+import { Hunter, HUNTER_RADIUS } from './hunter';
+import { LAYER_DEG, holonomySteps, layerOf } from './phase';
+import { passageKey } from './maze';
+import { makeRng } from './random';
 import { locateTile } from '../math/tiling';
 import { apply, decompose, distance, logOrigin, lorentzInverse, mul, rotation, translation } from '../math/lorentz';
-import type { Mat3 } from '../math/lorentz';
-import type { InputSource } from '../input/InputSource';
-import { approach, fitDistance, frobenius, identity4, mul4, planeRotation, rotationFromList, twistStep } from '../math/four';
-import type { Mat4 } from '../math/four';
-import type { GateSpec } from './level';
-import { analyzeLock } from './lock';
-import type { LockStatus } from './lock';
+import type { Mat3, Vec3 } from '../math/lorentz';
 import { toKlein } from '../math/poincare';
-import type { Vec3 } from '../math/lorentz';
+import type { InputSource } from '../input/InputSource';
 
 /** Physics substep: 240 Hz, so a marble at top speed moves < 0.015 per step. */
 export const PHYSICS_DT = 1 / 240;
 /** Time constant for easing the camera across a room-boundary jump, s. */
 const CAMERA_EASE = 0.25;
-/** Extra damping while twisting, so the marble settles instead of drifting. */
-const TWIST_BRAKE = 4;
+/** Time constant for a keyboard/BOOT phase step to glide to the next layer, s. */
+const PHASE_EASE = 0.07;
+export const LIVES = 3;
+/** Seconds of protection after being hit. */
+const INVULNERABLE = 2;
+/** Pick-up radius for shards, and the portal's catch radius as a fraction of the room. */
+const SHARD_RADIUS = 0.32;
+const PORTAL_FRACTION = 0.55;
+/** Hunter speed grows by this fraction per second, up to MAX_HUNTER_SPEED. */
+const HUNTER_RAMP = 0.025;
+const MAX_HUNTER_SPEED = 2.4;
 
 export interface GameSettings {
   marble: MarbleParams;
-  /** Gate tolerance τ on the Frobenius fit distance (CLAUDE.md §6.7). */
-  tolerance: number;
-  /**
-   * Settle assist: within 2τ of a fit, if the player stops twisting, the key
-   * drifts gently into place. Exact twisting to within ~14° is hard by hand.
-   */
-  assist: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
   marble: { ...DEFAULT_MARBLE },
-  tolerance: 0.35,
-  assist: true,
 };
 
-/** Time constant of the snap into a gate once within τ, s. */
-const SNAP_TIME = 0.08;
-/** Time constant of the settle assist inside 2τ, s. */
-const SETTLE_TIME = 0.45;
-/** Twist rates below this (rad/s) count as "not twisting" for the settle assist. */
-const SETTLE_IDLE = 0.15;
-/** Fit distances are shown relative to this: 2 is a 90° single-plane turn. */
-export const FIT_SCALE = 2;
-
-export interface Gate {
-  spec: GateSpec;
-  /** Target orientation, in the gate's reference frame. */
-  target: Mat4;
-  /** Wall id of the gate, and the room on its far side. */
-  wall: number;
-  across: number;
-  open: boolean;
-}
-
-/** A closed loop that turned the key: emitted when the marble re-enters a room with a new holonomy. */
+/** A closed loop that turned your frame: emitted when you re-enter a room with a new holonomy. */
 export interface LoopEvent {
   /** Rotation picked up around this loop, degrees (−72 per counter-clockwise pillar). */
   degrees: number;
@@ -74,6 +57,15 @@ export interface LoopEvent {
   /** World point to label: the centroid of the enclosed pillars. */
   where: Vec3;
 }
+
+export interface PhaseEvent {
+  from: number;
+  to: number;
+  /** 'twist' when you dialled it, 'curvature' when a loop moved you. */
+  cause: 'twist' | 'curvature';
+}
+
+export type GameStatus = 'playing' | 'won' | 'lost';
 
 /** Trail samples per second, and how many are kept (30 s). */
 const TRAIL_HZ = 30;
@@ -99,51 +91,46 @@ export function windingNumber(poly: readonly [number, number][], q: readonly [nu
   return w;
 }
 
-/** What the HUD and views need to know about the gate the marble is at. */
-export interface GateReading {
-  index: number;
-  /** Key holonomy measured at the gate, rad. */
-  holonomy: number;
-  /** Fit distance ‖K_eff − target‖_F. */
-  distance: number;
-  /** The target expressed in the marble's local frame (what the ghost shows). */
-  ghost: Mat4;
-  /** Per-tumbler guidance (see lock.ts). */
-  lock: LockStatus;
-}
-
 export class Game {
   level!: LoadedLevel;
   marble = new Marble();
   /** Tile the marble's centre is in. */
   room = 0;
-  /** The key's frame at the centre of the current room (see transport.ts). */
+  /** Your frame at the centre of the current room, carried along room centres (transport.ts). */
   carry!: Mat3;
   /** Display-only rotation that eases out the jump at room boundaries, rad. */
   cameraOffset = 0;
-  twistMode = false;
-  completed = false;
   /** Seconds since the level started. */
   time = 0;
-  /** Largest wall impact speed since the last read (for sound/vibration). */
-  lastImpact = 0;
-  /** The key's orientation in the marble's local (carried) frame. */
-  key: Mat4 = identity4();
-  gates: Gate[] = [];
-  /** The gate being approached this frame, if any. */
-  gateReading: GateReading | null = null;
-  /** Gate indices opened since the last read (for sound and the HUD). */
-  openedEvents: number[] = [];
-  /** Loops closed since the last read. */
+  status: GameStatus = 'playing';
+
+  /** Phase you have dialled in yourself, degrees (continuous while twisting). */
+  twistDeg = 0;
+  /** Where the twist settles when you let go: a whole number of layers. */
+  private twistTarget = 0;
+  /** The layer of the fourth dimension you are in, 0..4. */
+  layer = 0;
+
+  lives = LIVES;
+  /** Seconds of protection left after a hit. */
+  invulnerable = 0;
+  shards: { spec: ShardSpec; collected: boolean }[] = [];
+  hunters: Hunter[] = [];
+
+  // Events since the last read (sound, HUD); the caller empties them.
+  phaseEvents: PhaseEvent[] = [];
+  pickupEvents: number[] = [];
+  hitEvents = 0;
   loopEvents: LoopEvent[] = [];
+  /** Largest wall impact speed since the last read. */
+  lastImpact = 0;
   /** Recent marble positions (world), oldest first, sampled at 30 Hz. */
   trail: Vec3[] = [];
-  /** Rooms entered since the last loop closed, with the holonomy on entry. */
-  private history: { room: number; holonomy: number }[] = [];
-  private trailClock = 0;
 
   private accumulator = 0;
   private colliders: Collider[] = [];
+  private history: { room: number; holonomy: number }[] = [];
+  private trailClock = 0;
 
   constructor(public settings: GameSettings = DEFAULT_SETTINGS) {}
 
@@ -155,116 +142,62 @@ export class Game {
     this.room = spec.start;
     this.carry = [...start.frame] as Mat3;
     this.cameraOffset = 0;
-    this.twistMode = false;
-    this.completed = false;
     this.time = 0;
+    this.status = 'playing';
     this.accumulator = 0;
-    this.key = identity4();
-    this.gateReading = null;
-    this.openedEvents = [];
+    this.twistDeg = 0;
+    this.twistTarget = 0;
+    this.layer = 0;
+    this.lives = LIVES;
+    this.invulnerable = 0;
+    this.shards = spec.shards.map((s) => ({ spec: s, collected: false }));
+    const rand = makeRng(spec.seed * 7919 + 1);
+    // Hunters are shadows: they drift through doors of any colour, but not through solid walls.
+    const graph = { tiling: this.level.tiling, passable: (a: number, b: number) => this.passable(a, b, -2) || this.isDoor(a, b) };
+    this.hunters = spec.hunters.map((h) => new Hunter(h.layer, h.tile, graph, rand));
+    this.phaseEvents = [];
+    this.pickupEvents = [];
+    this.hitEvents = 0;
     this.loopEvents = [];
     this.trail = [];
     this.trailClock = 0;
     this.history = [{ room: spec.start, holonomy: 0 }];
-    const { world, tiling } = this.level;
-    this.gates = (spec.gates ?? []).map((g) => ({
-      spec: g,
-      target: rotationFromList(g.target),
-      wall: world.wallOn(g.tile, g.edge),
-      across: tiling.tiles[g.tile].neighbors[g.edge],
-      open: false,
-    }));
     this.rebuildColliders();
   }
 
-  /** Whether the current level lets the player twist the key. */
+  /** Whether the current level lets you twist through the fourth dimension. */
   twistAllowed(): boolean {
     return this.level.spec.twist !== false;
   }
 
-  /** Walls (except open gates) and posts the marble can touch from its room. */
+  /** Whether you can pass between adjacent rooms a and b while in `layer`. */
+  passable(a: number, b: number, layer: number): boolean {
+    const { maze, world, tiling } = this.level;
+    if (maze.isRoom[a] !== 1 || maze.isRoom[b] !== 1 || !maze.open.has(passageKey(a, b))) return false;
+    const id = world.wallOn(a, tiling.tiles[a].neighbors.indexOf(b));
+    return id === -1 || world.walls[id].door === layer;
+  }
+
+  /** Whether the passage between adjacent rooms a and b is a door (of any colour). */
+  isDoor(a: number, b: number): boolean {
+    const { world, tiling, maze } = this.level;
+    if (maze.isRoom[a] !== 1 || maze.isRoom[b] !== 1) return false;
+    const id = world.wallOn(a, tiling.tiles[a].neighbors.indexOf(b));
+    return id !== -1 && world.walls[id].door !== -1;
+  }
+
+  /** Walls (minus doors open in your layer) and posts the marble can touch from its room. */
   rebuildColliders(): void {
     const { world } = this.level;
     this.colliders = [];
     for (const id of world.nearbyWalls[this.room]) {
       const w = world.walls[id];
-      if (w.gate !== -1 && this.gateIsOpen(w.gate)) continue;
+      if (w.door === this.layer) continue;
       this.colliders.push({ kind: 'segment', a: w.a, b: w.b, radius: WALL_HALF_WIDTH });
     }
     for (const id of world.nearbyPosts[this.room]) {
       this.colliders.push({ kind: 'point', p: world.posts[id].position, radius: POST_RADIUS });
     }
-  }
-
-  gateIsOpen(gate: number): boolean {
-    return this.gates[gate]?.open ?? false;
-  }
-
-  /**
-   * The key as the gate sees it: K_eff = R_xy(θ)·K_local, where θ is the
-   * holonomy measured on the gate's side. This is how the maze's curvature
-   * acts on the key (CLAUDE.md §6.7).
-   */
-  effectiveKey(holonomy: number): Mat4 {
-    return mul4(planeRotation('xy', holonomy), this.key);
-  }
-
-  /** The closed gate on an edge of the marble's room, nearest first, or −1. */
-  private nearbyGate(): number {
-    let best = -1;
-    let bestDist = Infinity;
-    this.gates.forEach((g, i) => {
-      if (g.open || (this.room !== g.spec.tile && this.room !== g.across)) return;
-      const mid = this.level.tiling.tiles[g.spec.tile].midpoints[g.spec.edge];
-      const d = distance(this.marble.position(), mid);
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
-      }
-    });
-    return best;
-  }
-
-  /** Twist, reset, measure the nearest gate's fit, snap and open it. */
-  private updateKey(dt: number, input: InputSource): void {
-    const rates = input.angularVelocity();
-    if (input.resetKey()) this.key = identity4();
-    if (this.twistMode) this.key = twistStep(this.key, rates, dt);
-
-    const index = this.nearbyGate();
-    if (index === -1) {
-      this.gateReading = null;
-      return;
-    }
-    const gate = this.gates[index];
-    const holonomy = this.holonomy(gate.spec.tile);
-    const ghost = mul4(planeRotation('xy', -holonomy), gate.target);
-    const d = fitDistance(this.effectiveKey(holonomy), gate.target);
-    this.gateReading = { index, holonomy, distance: d, ghost, lock: analyzeLock(this.key, holonomy, gate.spec) };
-    const idle = !this.twistMode || Math.hypot(rates[0], rates[1], rates[2]) < SETTLE_IDLE;
-    if (this.settings.assist && idle && d < 2 * this.settings.tolerance && d >= this.settings.tolerance) {
-      // Close, and the player has let go: drift into place.
-      this.key = approach(this.key, ghost, 1 - Math.exp(-dt / SETTLE_TIME));
-    }
-    if (d < this.settings.tolerance) {
-      // Within τ: glide onto the exact fit, then open.
-      this.key = approach(this.key, ghost, 1 - Math.exp(-dt / SNAP_TIME));
-      if (frobenius(this.key, ghost) < 1e-3) {
-        this.key = ghost;
-        gate.open = true;
-        this.openedEvents.push(index);
-        this.gateReading = null;
-        this.rebuildColliders();
-      }
-    }
-  }
-
-  /** 0 = far, 1 = within τ; ramps up inside 2τ (drives the glow and vibration). */
-  gateGlow(): number {
-    const r = this.gateReading;
-    if (!r) return 0;
-    const tau = this.settings.tolerance;
-    return Math.max(0, Math.min(1, (2 * tau - r.distance) / tau));
   }
 
   /**
@@ -279,40 +212,59 @@ export class Game {
     return withOffset ? mul(v, rotation(this.cameraOffset)) : v;
   }
 
-  /**
-   * Holonomy of the key in the current room: the carried frame's rotation
-   * relative to the room's reference frame. Always a multiple of 72° for {5,4}.
-   */
-  holonomy(room = this.room): number {
-    const ref = this.level.references[room];
-    return ref ? angleBetween(ref, this.carryInRoom(room)) : 0;
+  /** Holonomy in the current room: the carried frame's turn relative to the direct route (multiple of 72°). */
+  holonomy(): number {
+    const ref = this.level.references[this.room];
+    return ref ? angleBetween(ref, this.carry) : 0;
   }
 
-  /** The carried frame as it would be in `room` (the current room or a neighbour). */
-  carryInRoom(room: number): Mat3 {
-    if (room === this.room) return this.carry;
-    return carryAcross(this.level.tiling, this.carry, this.room, room);
+  /** Your phase as one continuous angle (degrees): twist plus curvature. Drives the phase ring. */
+  phaseDeg(): number {
+    return this.twistDeg + holonomySteps(this.holonomy()) * LAYER_DEG;
+  }
+
+  shardsLeft(): number {
+    return this.shards.filter((s) => !s.collected).length;
+  }
+
+  exitOpen(): boolean {
+    return this.shardsLeft() === 0;
+  }
+
+  /** 0..1: how close the nearest hunter in your layer is (1 = touching). */
+  danger(): number {
+    let best = 0;
+    for (const h of this.hunters) {
+      if (h.layer !== this.layer) continue;
+      const d = distance(h.position, this.marble.position());
+      best = Math.max(best, 1 - Math.min(1, Math.max(0, d - 0.3) / 1.5));
+    }
+    return best;
+  }
+
+  /** Current hunter chase speed (units/s). */
+  hunterSpeed(): number {
+    return Math.min(MAX_HUNTER_SPEED, (this.level.spec.hunterSpeed ?? 0.8) * (1 + HUNTER_RAMP * this.time));
   }
 
   /** Advances the simulation by dt seconds of real time. */
   update(dt: number, input: InputSource): void {
-    if (input.twistToggled() && this.twistAllowed()) this.twistMode = !this.twistMode;
-    if (!this.twistAllowed()) this.twistMode = false;
+    if (this.status !== 'playing') return;
+    dt = Math.min(dt, 0.1);
+    this.updateTwist(dt, input);
 
-    this.accumulator += Math.min(dt, 0.1);
+    this.accumulator += dt;
     // Tilt is screen-aligned; physics runs in the marble's own frame M, which
     // differs from the screen frame V by a rotation β at the same point.
     const beta = decompose(mul(lorentzInverse(this.marble.frame), this.viewFrame())).angle;
-    const tilt = this.twistMode ? { x: 0, y: 0 } : input.tilt();
+    const tilt = input.tilt();
     const a = this.settings.marble.accel;
     const ax = a * (Math.cos(beta) * tilt.x - Math.sin(beta) * tilt.y);
     const ay = a * (Math.sin(beta) * tilt.x + Math.cos(beta) * tilt.y);
-
     while (this.accumulator >= PHYSICS_DT) {
       this.accumulator -= PHYSICS_DT;
       this.time += PHYSICS_DT;
-      const impact = this.marble.step(PHYSICS_DT, ax, ay, this.colliders, this.twistMode ? TWIST_BRAKE : 0);
-      this.lastImpact = Math.max(this.lastImpact, impact);
+      this.lastImpact = Math.max(this.lastImpact, this.marble.step(PHYSICS_DT, ax, ay, this.colliders));
       this.trackRoom();
       this.trailClock += PHYSICS_DT;
       if (this.trailClock >= 1 / TRAIL_HZ) {
@@ -321,13 +273,76 @@ export class Game {
         if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
       }
     }
-    // Ease the camera back onto the carried frame.
     this.cameraOffset *= Math.exp(-dt / CAMERA_EASE);
-    this.updateKey(dt, input);
-    this.checkGoal();
+    this.updateLayer('twist');
+    this.updateHunters(dt);
+    this.collectShards();
+    this.checkExit();
   }
 
-  /** Follows the marble from room to room, carrying the key's frame along. */
+  /** Twist input: whole steps glide to the next layer; a continuous twist follows the controller, then settles. */
+  private updateTwist(dt: number, input: InputSource): void {
+    let steps = input.phaseSteps();
+    let rate = input.phaseRate();
+    if (!this.twistAllowed()) {
+      steps = 0;
+      rate = 0;
+    }
+    if (steps !== 0) this.twistTarget = Math.round(this.twistTarget / LAYER_DEG) * LAYER_DEG + steps * LAYER_DEG;
+    if (Math.abs(rate) > 1e-6) {
+      this.twistDeg += rate * dt;
+      this.twistTarget = Math.round(this.twistDeg / LAYER_DEG) * LAYER_DEG;
+    } else {
+      this.twistDeg += (this.twistTarget - this.twistDeg) * (1 - Math.exp(-dt / PHASE_EASE));
+    }
+  }
+
+  /** Recomputes your layer; emits an event (and swaps the doors) when it changes. */
+  private updateLayer(cause: PhaseEvent['cause']): void {
+    const layer = layerOf(this.twistDeg, holonomySteps(this.holonomy()));
+    if (layer === this.layer) return;
+    this.phaseEvents.push({ from: this.layer, to: layer, cause });
+    this.layer = layer;
+    this.rebuildColliders();
+  }
+
+  private updateHunters(dt: number): void {
+    if (this.invulnerable > 0) this.invulnerable = Math.max(0, this.invulnerable - dt);
+    const speed = this.hunterSpeed();
+    const me = this.marble.position();
+    for (const h of this.hunters) {
+      h.update(dt, speed, me, this.room, h.layer === this.layer);
+      if (h.layer !== this.layer || this.invulnerable > 0) continue;
+      if (distance(h.position, me) < this.settings.marble.radius + HUNTER_RADIUS) {
+        this.lives--;
+        this.hitEvents++;
+        this.invulnerable = INVULNERABLE;
+        h.respawn();
+        if (this.lives <= 0) this.status = 'lost';
+      }
+    }
+  }
+
+  private collectShards(): void {
+    const me = this.marble.position();
+    this.shards.forEach((s, i) => {
+      if (s.collected || s.spec.layer !== this.layer) return;
+      if (distance(me, this.level.tiling.tiles[s.spec.tile].center) < SHARD_RADIUS) {
+        s.collected = true;
+        this.pickupEvents.push(i);
+      }
+    });
+  }
+
+  private checkExit(): void {
+    if (!this.exitOpen() || this.room !== this.level.spec.exit) return;
+    const { tiling } = this.level;
+    if (distance(this.marble.position(), tiling.tiles[this.room].center) < tiling.metrics.inradius * PORTAL_FRACTION) {
+      this.status = 'won';
+    }
+  }
+
+  /** Follows the marble from room to room, carrying its frame along. */
   private trackRoom(): void {
     const { tiling } = this.level;
     const next = locateTile(tiling, this.marble.position(), this.room);
@@ -338,15 +353,16 @@ export class Game {
     // Keep the picture continuous: absorb the frame jump into the offset.
     this.cameraOffset = wrapAngle(this.cameraOffset + angleBetween(this.viewFrame(false), before));
     this.rebuildColliders();
-    this.onRoomChange();
+    this.detectLoop();
+    // A loop may have turned you into another layer.
+    this.updateLayer('curvature');
   }
 
   /**
-   * Loop detection. Revisiting a room closes a loop; if the key's holonomy
-   * changed, the loop enclosed pillars, so report how much and which. Either
-   * way the history is cut back, so the next loop is measured fresh.
+   * Loop detection. Revisiting a room closes a loop; if the holonomy changed,
+   * the loop enclosed pillars, so report how much and which.
    */
-  private onRoomChange(): void {
+  private detectLoop(): void {
     const holonomy = this.holonomy();
     const i = this.history.findIndex((h) => h.room === this.room);
     if (i === -1) {
@@ -377,23 +393,13 @@ export class Game {
     if (turns === 0) return;
     // Each pillar contributes the area of the dual polygon around it: q rooms
     // meet there, and that q-gon has corners of 2π/p, so its area is
-    // (q − 2)·180° − q·360°/p (72° for {5,4}). Counter-clockwise (positive
-    // winding) laps turn the key clockwise.
+    // (q − 2)·180° − q·360°/p (72° for {5,4}). Counter-clockwise laps turn you clockwise.
     const { p, q } = tiling.metrics;
     const perPillar = (q - 2) * 180 - (q * 360) / p;
-    const where = pillars
+    const sum = pillars
       .map((id) => world.posts[id].position)
       .reduce((a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]] as Vec3, [0, 0, 0] as Vec3);
-    const norm = Math.sqrt(Math.max(1e-12, where[2] * where[2] - where[0] * where[0] - where[1] * where[1]));
-    this.loopEvents.push({ degrees: -turns * perPillar, pillars, where: [where[0] / norm, where[1] / norm, where[2] / norm] });
-  }
-
-  private checkGoal(): void {
-    if (this.completed) return;
-    const { spec, tiling, metrics } = { ...this.level, metrics: this.level.tiling.metrics };
-    if (this.room !== spec.goal) return;
-    if (distance(this.marble.position(), tiling.tiles[spec.goal].center) < metrics.inradius * 0.6) {
-      this.completed = true;
-    }
+    const n = Math.sqrt(Math.max(1e-12, sum[2] * sum[2] - sum[0] * sum[0] - sum[1] * sum[1]));
+    this.loopEvents.push({ degrees: -turns * perPillar, pillars, where: [sum[0] / n, sum[1] / n, sum[2] / n] });
   }
 }

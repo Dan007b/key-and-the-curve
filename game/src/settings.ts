@@ -1,7 +1,7 @@
 /**
- * Player settings (CLAUDE.md §9): sensitivity, deadzone, damping, the twist
- * axis mapping, the gate tolerance τ, and a few toggles. Kept in this
- * browser's localStorage as a convenience; everything works without it.
+ * Player settings: controller tilt and phase-twist feel, rolling friction,
+ * and a few toggles. Kept in this browser's localStorage as a convenience;
+ * everything works without it.
  */
 
 import { DEFAULT_TILT } from './input/serialProtocol';
@@ -14,19 +14,13 @@ export interface Settings {
   invertX: boolean;
   invertY: boolean;
   swapXY: boolean;
+  /** Degrees of phase per degree of controller turn (72° of phase = one layer). */
+  phaseGain: number;
+  phaseInvert: boolean;
   /** Marble damping rate, 1/s. */
   damping: number;
-  /** Gate tolerance τ. */
-  tolerance: number;
-  /** Sensor axis (0 = x, 1 = y, 2 = z) driving the XW, YW and ZW planes. */
-  twistAxes: [number, number, number];
-  twistInvert: [boolean, boolean, boolean];
   trail: boolean;
   sound: boolean;
-  /** Let the key settle into a gate when close and released. */
-  assist: boolean;
-  /** Controller twists one plane at a time (strongest wrist axis). */
-  onePlane: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -35,17 +29,14 @@ export const DEFAULT_SETTINGS: Settings = {
   invertX: false,
   invertY: false,
   swapXY: false,
+  phaseGain: 1.2,
+  phaseInvert: false,
   damping: DEFAULT_MARBLE.damping,
-  tolerance: 0.35,
-  twistAxes: [0, 1, 2],
-  twistInvert: [false, false, false],
   trail: true,
   sound: true,
-  assist: true,
-  onePlane: true,
 };
 
-const STORAGE_KEY = 'key-and-the-curve.settings.v1';
+const STORAGE_KEY = 'phase-escape.settings.v1';
 
 export function loadSettings(): Settings {
   try {
@@ -76,17 +67,12 @@ export function settingsForm(initial: Settings, onChange: (s: Settings) => void)
     h.textContent = title;
     form.appendChild(h);
   };
-  const row = (label: string, control: HTMLElement, note?: string) => {
+  const row = (label: string, control: HTMLElement) => {
     const r = document.createElement('label');
     r.className = 'settings-row';
     const l = document.createElement('span');
     l.textContent = label;
     r.append(l, control);
-    if (note) {
-      const n = document.createElement('small');
-      n.textContent = note;
-      r.appendChild(n);
-    }
     form.appendChild(r);
   };
   const slider = (label: string, min: number, max: number, step: number, get: () => number, set: (v: number) => void, fmt: (v: number) => string) => {
@@ -119,48 +105,19 @@ export function settingsForm(initial: Settings, onChange: (s: Settings) => void)
     row(label, input);
   };
 
-  section('Controller tilt');
+  section('Controller: rolling (tilt)');
   slider('Sensitivity (full tilt at)', 8, 45, 1, () => s.fullTiltDeg, (v) => (s.fullTiltDeg = v), (v) => `${v}°`);
   slider('Deadzone', 0, 0.4, 0.01, () => s.deadzone, (v) => (s.deadzone = v), (v) => `${Math.round(v * 100)}%`);
   checkbox('Invert left/right', () => s.invertX, (v) => (s.invertX = v));
   checkbox('Invert up/down', () => s.invertY, (v) => (s.invertY = v));
   checkbox('Swap axes', () => s.swapXY, (v) => (s.swapXY = v));
 
-  section('Twist mapping (controller)');
-  (['XW', 'YW', 'ZW'] as const).forEach((plane, i) => {
-    const wrap = document.createElement('span');
-    wrap.className = 'settings-pair';
-    const select = document.createElement('select');
-    ['sensor x', 'sensor y', 'sensor z'].forEach((name, axis) => {
-      const o = document.createElement('option');
-      o.value = String(axis);
-      o.textContent = name;
-      select.appendChild(o);
-    });
-    select.value = String(s.twistAxes[i]);
-    select.addEventListener('change', () => {
-      s.twistAxes[i] = Number(select.value);
-      onChange(structuredClone(s));
-    });
-    const inv = document.createElement('input');
-    inv.type = 'checkbox';
-    inv.checked = s.twistInvert[i];
-    inv.title = 'Invert';
-    inv.addEventListener('change', () => {
-      s.twistInvert[i] = inv.checked;
-      onChange(structuredClone(s));
-    });
-    const invLabel = document.createElement('span');
-    invLabel.textContent = 'invert';
-    wrap.append(select, inv, invLabel);
-    row(`${plane} plane`, wrap);
-  });
-  checkbox('One plane at a time (strongest wrist axis wins)', () => s.onePlane, (v) => (s.onePlane = v));
+  section('Controller: phasing (turn like a dial)');
+  slider('Turn needed per layer', 30, 120, 1, () => 72 / s.phaseGain, (v) => (s.phaseGain = 72 / v), (v) => `${Math.round(v)}°`);
+  checkbox('Reverse phasing direction', () => s.phaseInvert, (v) => (s.phaseInvert = v));
 
   section('Game');
   slider('Rolling friction', 0.2, 3, 0.05, () => s.damping, (v) => (s.damping = v), (v) => `${v.toFixed(2)} /s`);
-  slider('Gate tolerance τ', 0.15, 0.6, 0.01, () => s.tolerance, (v) => (s.tolerance = v), (v) => `${v.toFixed(2)} (≈${Math.round((2 * Math.asin(v / (2 * Math.SQRT2)) * 180) / Math.PI)}°)`);
-  checkbox('Settle assist (key slides in when close)', () => s.assist, (v) => (s.assist = v));
   checkbox('Holonomy trail (T)', () => s.trail, (v) => (s.trail = v));
   checkbox('Sound (M)', () => s.sound, (v) => (s.sound = v));
   return form;

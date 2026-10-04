@@ -4,15 +4,13 @@ import { LEVELS, loadLevel } from '../src/game/level';
 import { roomDistances } from '../src/game/maze';
 import type { InputSource } from '../src/input/InputSource';
 import { decompose, lorentzInverse, mul } from '../src/math/lorentz';
-import { drive, shortestRoute, waypoints } from './bot';
 
 /** A scripted input: constant tilt, no buttons. */
 function fakeInput(x: number, y: number): InputSource {
   return {
     tilt: () => ({ x, y }),
-    angularVelocity: () => [0, 0, 0],
-    twistToggled: () => false,
-    resetKey: () => false,
+    phaseSteps: () => 0,
+    phaseRate: () => 0,
     status: () => ({ label: 'test', connected: true }),
   };
 }
@@ -21,7 +19,7 @@ describe('levels', () => {
   it('all load, with a reachable goal', () => {
     for (const spec of LEVELS) {
       const level = loadLevel(spec);
-      expect(roomDistances(level.tiling, level.maze, spec.start).has(spec.goal)).toBe(true);
+      expect(roomDistances(level.tiling, level.maze, spec.start).has(spec.exit)).toBe(true);
     }
   });
 });
@@ -43,17 +41,6 @@ describe('game loop', () => {
     }
     expect(rooms.has(0)).toBe(true);
     expect(rooms.size).toBeGreaterThan(1);
-  });
-
-  it('level 1 can be rolled from start to goal using tilt alone', () => {
-    const game = new Game();
-    game.load(LEVELS[0]);
-    const route = shortestRoute(game, LEVELS[0].start, LEVELS[0].goal);
-    const seconds = drive(game, waypoints(game, route));
-    expect(seconds).toBeLessThan(60);
-    // Settle in the goal room.
-    for (let i = 0; i < 60 && !game.completed; i++) game.update(1 / 60, fakeInput(0, 0));
-    expect(game.completed).toBe(true);
   });
 
   it('measures zero holonomy along the maze tree', () => {
