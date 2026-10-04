@@ -657,3 +657,9 @@ canvas {
     gap: 10px;
   }
 }
+
+/* The phase ring fills the inset, so its label sits just above the frame. */
+.hud-inset .hud-inset-label {
+  top: -20px;
+  left: 2px;
+}

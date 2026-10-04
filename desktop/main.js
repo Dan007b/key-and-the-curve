@@ -1,4 +1,4 @@
-// The Key and the Curve, desktop build: the web game in its own window,
+// Phase Escape, desktop build: the web game in its own window,
 // with Web Serial wired up so the ESP32 controller works without a browser.
 
 const { app, BrowserWindow, dialog, session } = require('electron');
@@ -25,7 +25,7 @@ function createWindow() {
     minWidth: 640,
     minHeight: 480,
     backgroundColor: '#05060a',
-    title: 'The Key and the Curve',
+    title: 'Phase Escape',
     icon: path.join(__dirname, 'icon.ico'),
     // The menu (Alt) keeps F11 full screen, reload and zoom.
     autoHideMenuBar: true,

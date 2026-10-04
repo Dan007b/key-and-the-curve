@@ -1,18 +1,15 @@
 # Two-minute demo script
 
-Setup: the game open full-screen in Chrome (`npm run dev`), the controller connected and calibrated (cal reads S3 G3 A3 M3), and **Set level** pressed while holding it flat. Sound on. Have **Watch demo** ready as a fallback if the controller misbehaves.
+Setup: the desktop app full-screen, controller connected and calibrated, **Set level** pressed while holding it flat, sound on. **Watch demo** is the fallback if the controller misbehaves.
 
 | Time | On screen | Say |
 |---|---|---|
-| 0:00 | Level 1 intro card | "This is a marble maze in hyperbolic space, the geometry where triangles add up to less than 180° and space grows exponentially." |
-| 0:10 | Tilt the controller; the marble rolls | "I'm tilting a real controller: an ESP32 with an orientation sensor, streaming at 100 Hz. The view stays centred on the marble. Rooms near the rim look tiny, but they're all the same size: there's just exponentially more of them." |
-| 0:30 | Level 2: reach the magenta gate; the ghost appears in the corner | "The gate needs the key, this tesseract, in a specific orientation. That's the ghost behind it." |
-| 0:40 | Press BOOT; violet ring; rotate wrist; the XW dial swings up; GATE OPEN | "The gate is a 4D lock with four dials: three twist planes and curvature. BOOT switches to twist mode, and my wrist rotates the key through the fourth dimension. When every dial points up, the key matches and it slides in." |
-| 0:55 | Level 3 (Levels → 3); roll straight to the gate | "Here twisting is disabled, and the gate wants the key turned 72°. The direct route doesn't do it." |
-| 1:05 | Roll back and loop the glowing pillar counter-clockwise; trail and −72° label; the maze turns | "But if I roll once around this pillar... the key comes back turned by 72°, and so does the whole maze. Nothing twisted it. The curvature of space did." |
-| 1:20 | The aha card with the formula | "The four rooms around a pillar make a square whose corners are 72°, not 90°. Go around it and you pick up exactly its area: 2·180° − 4·72° = 72°. That's holonomy. In curved space, the path you take changes the object you carry." |
-| 1:35 | Gate opens; roll to the goal | "Go round the other way and it turns the other way. Some gates need both: a 4D twist and a loop." |
-| 1:45 | Level 5 overview, or the README screenshot | "Under the hood: exact Lorentz-matrix geometry in float64, instanced GPU rendering at 60 FPS, and 118 tests, including an autopilot that plays every level to the end with the real physics." |
-| 1:55 | Title | "The Key and the Curve." |
-
-If time is short, skip level 1 and start at level 2.
+| 0:00 | Level 1 card | "Phase Escape: a chase through a maze in curved space, with a fourth dimension." |
+| 0:08 | Tilt the controller; the marble rolls | "I'm tilting a real controller, an ESP32 with an orientation sensor at 100 Hz. This is the hyperbolic plane: rooms crowd towards the edge because space grows exponentially." |
+| 0:22 | A gold door blocks the way; turn the controller like a dial; the world turns gold; roll through | "The maze has a fourth dimension: five layers, five colours. Doors only open in their own colour. Turning the controller like a dial slides me through the fourth dimension, and the whole world changes colour." |
+| 0:40 | Level 2: a red hunter rushes in; danger glow; phase to green; it becomes a ghost | "Hunters live in one layer. This one is red, and so am I. Phase out, and it can't see me anymore." |
+| 0:58 | Level 3 (Levels → 3); twist jammed; roll a lap around the glowing pillar; the world turns violet; the −72° label | "Here twisting is jammed. But watch: I roll once around this pillar, without touching the dial, and I come back violet. Space moved me through the fourth dimension." |
+| 1:15 | The holonomy card with the formula | "The four rooms around a pillar make a square with 72° corners, not 90°. A lap turns you by its area: 2·180° − 4·72° = 72°, exactly one of five layers. That's holonomy: in curved space, your path changes you." |
+| 1:35 | Grab a shard, the portal opens, roll in; stars | "Collect the shards, reach the portal, don't get caught three times." |
+| 1:45 | Level 5 overview, or the README | "Under the hood: exact Lorentz-matrix geometry in float64, GPU-instanced rendering at 60 FPS, and 109 tests, including a solver that proves every level is beatable." |
+| 1:55 | Title | "Phase Escape." |

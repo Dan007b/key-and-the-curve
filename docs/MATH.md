@@ -1,4 +1,4 @@
-# The maths behind The Key and the Curve
+# The maths behind Phase Escape
 
 This is the geometry the game runs on, written for someone curious rather than for a specialist. Each section points to the code that implements it and the tests that check it.
 
@@ -93,49 +93,41 @@ Code: `game/src/math/tiling.ts`.
 
 **The fact.** Carry a direction around a closed geodesic polygon by parallel transport. It comes back rotated by the polygon's area: clockwise for a counter-clockwise loop, because the curvature is negative. Once around a single {5,4} tile turns it by 90°. The test `holonomy.test.ts` walks a frame around a tile using only translations and finds −π/2 to within 1e-9. It also checks 20 other regular polygons against their areas.
 
-**What the game does with it.** The marble's own frame rotates by the area its actual path enclosed. That path wobbles: hug the inner wall of a loop or swing wide, and the enclosed area changes by about a radian. A gate with a ~14° tolerance can't depend on that. So the key is carried along a cleaner path: the chain of geodesics joining **room centres**. When the marble crosses into the next room, the key's frame is translated straight from the old centre to the new one (`game/src/game/transport.ts`).
+**What the game does with it.** The marble's own frame rotates by the area its actual path enclosed. That path wobbles: hug the inner wall of a loop or swing wide, and the enclosed area changes by about a radian. A game rule can't depend on that. So your frame is carried along a cleaner path: the chain of geodesics joining **room centres**. When the marble crosses into the next room, the carried frame is translated straight from the old centre to the new one (`game/src/game/transport.ts`).
 
 Any closed walk through rooms is then an exact geodesic polygon. The smallest loop goes through the four rooms around one vertex: a square of the dual {4,5} tiling. Its corners are 360°/5 = 72° instead of 90°, so its area is
 
 > 2·180° − 4·72° = **72°**.
 
-Every loop turns the key by a whole number of 72° steps, one for each pillar it goes around. A lap around a whole tile encloses its five pillars: 5·72° = 360°, back to the start. A post at every vertex stops the marble cutting through one, so "which side of each pillar did you pass" is always well defined. Wiggles inside a room change nothing.
+Every loop turns you by a whole number of 72° steps, one for each pillar it goes around. A lap around a whole tile encloses its five pillars: 5·72° = 360°, back to the start. A post at every vertex stops the marble cutting through one, so "which side of each pillar did you pass" is always well defined. Wiggles inside a room change nothing.
 
 Because every carried frame is a room's canonical frame turned by a multiple of 36°, the code snaps to that grid after each step. Rounding errors can never build up.
 
-**Measuring it.** The maze generator carves a spanning tree: exactly one direct route to every room. The start frame carried along that tree gives each room a reference frame. The key's holonomy is its carried frame's angle relative to the reference: 0° on the direct route, ±72° per pillar looped. The view uses the carried frame as the screen axes, so after a loop the whole maze appears turned by that angle.
+**Measuring it.** The maze generator carves a spanning tree: exactly one direct route to every room. The start frame carried along that tree gives each room a reference frame. Your holonomy is the carried frame's angle relative to the reference: 0° on the direct route, ±72° per pillar looped. The view uses the carried frame as the screen axes, so after a loop the whole maze appears turned by that angle.
 
-## 8. The 4D key
+## 8. The fourth dimension: five layers
 
-Code: `game/src/math/four.ts`, `game/src/render/keyView.ts`.
+Code: `game/src/game/phase.ts`, `game.ts`, `hunter.ts`.
 
-**The tesseract** has 16 vertices (±1, ±1, ±1, ±1) and 32 edges, joining vertices that differ in one coordinate. Its orientation K is a 4×4 rotation matrix, stored in the marble's local frame.
+The maze is a 2D hyperbolic maze times a circle: a phase coordinate w that wraps around. Picture a stack of five copies of the maze, where going up from the top copy brings you back to the bottom. The circle is cut into five layers of 72°, one colour each. Everything coloured lives in one layer:
 
-**Rotating in 4D.** In 3D you rotate about an axis; in 4D you rotate *in a plane*, and there are six: XY, XZ, XW, YZ, YW, ZW. Twist mode drives the three that involve the fourth axis:
+- a **door** is a wall with a gap at one position along w: open only in its own layer;
+- a **shard** sits at one position along w: you can only reach it from its layer;
+- a **hunter** lives in one layer: it can only see and touch you there.
 
-  K ← exp(dt·(ω₁E_xw + ω₂E_yw + ω₃E_zw))·K,
+You only ever see your own slice (the world is tinted its colour); other layers' things show as ghosts.
 
-where ω are the controller's gyro rates (or the Q/A, W/S, E/D keys) and E are the planes' antisymmetric generators. The exponential is approximated by the product of the three plane rotations. That differs by commutator terms of size dt²·ω²/2, about 0.001 rad per frame, and is still an exact rotation. K is re-orthonormalised every frame.
+**Two ways to move along w.** Your phase is
 
-**Drawing it.** 4D → 3D by perspective along w, x′ = x·s/(d − w) with d = 3: corners nearer in w look bigger, which produces the familiar cube-in-a-cube. Then 3D → screen with an ordinary perspective camera. Edges are coloured by axis and brightened by depth in w.
+  layer = (twist steps + holonomy steps) mod 5.
 
-**How curvature reaches the key.** At a gate, the key is compared in the gate's frame:
+Twist steps are what you dial in: keys, the BOOT button, or turning the controller like a dial (the gyro's rate projected onto the "level" vertical; tilting rotates about horizontal axes, so it barely counts). Holonomy steps come from §7: every lap around a pillar turns your carried frame by exactly 72°, which is exactly one layer. That is not a coincidence we arranged: in the {5,4} tiling, the turn per pillar (72°) divides 360° into exactly five steps, so the five layers are the holonomy group of the maze. Looping clockwise moves you up a layer and counter-clockwise down, and five laps bring you all the way round.
 
-  K_eff = R_xy(θ)·K,
+**Hunters** move like the marble does, room by room, along the shortest route through the maze (they drift through doors, but not through walls). They only chase when they can see you, that is, when you share their layer; otherwise they patrol. Rooms are convex, so a straight move to the next doorway never cuts through a wall.
 
-where θ is the holonomy (§7) measured on the gate's side, and R_xy rotates the key's XY plane. Looping a pillar changes θ by 72°, which turns the key relative to the gate.
+**The 4D body.** The inset shows a tesseract (16 vertices (±1, ±1, ±1, ±1), 32 edges) projected 4D → 3D by perspective along w, x′ = x·s/(d − w) with d = 3, then drawn with a 3D camera. It is rotated in the XW plane by your phase angle, so twisting visibly turns it through the fourth dimension and a pillar lap jumps it a fifth of a turn. Rotations in 4D happen in planes, not about axes; XW turns the x direction into w, which is why the inner and outer cubes appear to swap through each other.
 
-**A key must not be symmetric.** The obvious fit test, min over symmetries S of ‖K_eff − S·target‖, uses the tesseract's rotation group B₄⁺: the 192 signed permutation matrices with determinant +1. But B₄⁺ contains every 90° plane rotation. So an untouched tesseract already "fits" a 90° XW target, and a 90° curvature turn would be invisible (`four.test.ts` demonstrates both). Real keys have teeth for a reason. Ours has coloured axes and one marked corner (the white bead), which leaves only the identity as a symmetry. The fit is simply
-
-  d = ‖K_eff − target‖_F.
-
-For a single-plane mismatch of angle α, d = 2√2·|sin(α/2)|. The gate starts glowing within 2τ, and within τ = 0.35 (about 14°) the key glides onto the exact orientation and the gate opens. If the player gets within 2τ and stops twisting, the key also drifts the rest of the way (the settle assist).
-
-**Telling the player which way to turn.** Every gate target is written as twists in the W planes followed by a turn in XY, so the lock splits into four dials: curvature (XY) and the XW, YW, ZW twists (`game/src/game/lock.ts`). For each twist plane, the best angle to turn has a closed form. ‖R(θ)·K − T‖² = const − 2·tr(R(θ)·M) with M = K·Tᵀ, and for a rotation in plane (i, j), tr(R(θ)·M) = rest + cos θ·(M_ii + M_jj) + sin θ·(M_ij − M_ji). So the best twist is
-
-  θ* = atan2(M_ij − M_ji, M_ii + M_jj),
-
-which is exactly the remaining angle when the mismatch lies in that plane. That is what each dial shows, and the panel highlights the plane with the most to go. For curvature, the dial shows the difference between the holonomy needed and the holonomy carried, in 72° laps.
+**Why it is fair.** A breadth-first search over (room, holonomy step, twist step, shards held) proves every level can be finished, and shows level 3 (twisting jammed) cannot be finished without looping (`tests/levels.test.ts`). An autopilot also plays levels 1 and 3 with the real physics.
 
 ## 9. Numerical care, in one table
 
@@ -143,8 +135,7 @@ which is exactly the remaining angle when the mismatch lies in that plane. That 
 |---|---|---|
 | Frames composed every step | Drift off the hyperboloid | Minkowski Gram–Schmidt every step; position column fixed first |
 | Distances between nearby points | acosh loses digits near 1 | d = 2·asinh(½√⟨p−q, p−q⟩) |
-| Carried key frame | Rounding over a long game | Snapped to the exact 36° grid after every room |
+| Carried frame | Rounding over a long game | Snapped to the exact 36° grid after every room |
 | GPU in float32 | Cancellation far from the origin | Canonical shapes plus per-instance matrices formed in float64 |
 | Disk rim | tanh(d/2) rounds to 1 beyond ~37 units | Clamp to 1 − 4ε (and cull beyond 5.5 units anyway) |
-| Key orientation | Drift from many twist steps | Row Gram–Schmidt every frame; det kept at +1 |
 | Physics step | Tunnelling through walls | 240 Hz substeps and a speed cap: < 0.015 units per step |

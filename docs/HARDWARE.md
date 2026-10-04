@@ -26,11 +26,10 @@ Everything connects to **one header**: the side with the 5V (or VIN) and GND pin
 
 ### The button
 
-There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the trigger. **Press once to enter 4D twist mode, press again to leave it.** In twist mode, rotating the controller turns the key one plane at a time: whichever wrist axis is rotating fastest wins, and small wobbles (under about 17°/s) are ignored. This can be switched off under Settings. The firmware only reports whether BOOT is held (debounced, 20 ms); the game turns presses into the on/off toggle, so it can also switch twist mode off itself (for example on levels where twisting is disabled).
+There is no extra button to wire: the DevKitC's **BOOT** button (GPIO0) is the only button. In Phase Escape each press **moves you up one layer** of the fourth dimension. The firmware only reports whether BOOT is held (debounced, 20 ms); the game counts presses. Turning the whole controller like a dial (about the vertical you captured with Set level) also slides you through the layers.
 
 Don't hold BOOT while plugging the board in or pressing EN: GPIO0 is sampled at reset, and holding it low starts the bootloader instead of the firmware. Pressing it at any other time is safe.
 
-Resetting the key is done from the keyboard (R) or the on-screen button.
 
 ### Powering the BNO055 from 5V/VIN
 
@@ -96,7 +95,7 @@ $,qw,qx,qy,qz,gx,gy,gz,wx,wy,wz,cal,btn
 | `gx..gz` | Gravity vector in the sensor frame, m/s² (0.01 resolution). |
 | `wx..wz` | Gyro angular velocity, **rad/s**. |
 | `cal` | Calibration status `sys*1000 + gyr*100 + acc*10 + mag`, each 0–3. It is a plain integer, so leading zeros are dropped: `300` means sys 0, gyr 3, acc 0, mag 0. `3333` is fully calibrated. |
-| `btn` | 1 while BOOT is held, else 0 (bit1 is reserved and always 0). The game toggles twist mode on each press. |
+| `btn` | 1 while BOOT is held, else 0 (bit1 is reserved and always 0). The game moves you up one layer on each press. |
 
 **Gyro units.** The BNO055 powers up reporting deg/s, and the Adafruit library never changes that register; its `getVector(VECTOR_GYROSCOPE)` divides the raw value by 16 LSB per deg/s. The firmware multiplies by π/180, so the stream is in rad/s.
 

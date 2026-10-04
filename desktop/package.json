@@ -1,14 +1,14 @@
 {
   "name": "key-and-the-curve-desktop",
-  "productName": "The Key and the Curve",
+  "productName": "Phase Escape",
   "version": "1.0.0",
-  "description": "Roll a marble through a hyperbolic maze carrying a 4D key.",
+  "description": "A chase through a 4D-layered maze in curved space.",
   "private": true,
   "main": "main.js",
   "scripts": {
     "build:web": "npm --prefix ../game run build && node scripts/copy-web.mjs",
     "start": "npm run build:web && electron .",
-    "package": "npm run build:web && electron-packager . \"The Key and the Curve\" --platform=win32 --arch=x64 --out=out --overwrite --icon=icon.ico --app-version=1.0.0 --ignore=^/out --ignore=^/scripts --ignore=^/icon\\.svg"
+    "package": "npm run build:web && electron-packager . \"Phase Escape\" --platform=win32 --arch=x64 --out=out --overwrite --icon=icon.ico --app-version=1.0.0 --ignore=^/out --ignore=^/scripts --ignore=^/icon\\.svg"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",
