@@ -17,8 +17,7 @@ import level3 from '../../levels/3-curvature.json';
 import level4 from '../../levels/4-combine.json';
 import level5 from '../../levels/5-final.json';
 
-/** A 4D rotation plane, named by its two axes. */
-export type Plane = 'xy' | 'xz' | 'xw' | 'yz' | 'yw' | 'zw';
+import type { Plane } from '../math/four';
 
 export interface GateSpec {
   /** The gate sits on this tile's edge; holonomy is measured on this side. */

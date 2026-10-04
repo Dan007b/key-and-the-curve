@@ -77,3 +77,42 @@ export function drive(game: Game, points: Vec3[], perPointLimit = 8): number {
   }
   return elapsed;
 }
+
+/** Enters twist mode, twists at the given XW/YW/ZW rates for `seconds`, and leaves twist mode. */
+export function twist(game: Game, rates: [number, number, number], seconds: number): void {
+  let toggle = true;
+  const input: InputSource = {
+    tilt: () => ({ x: 0, y: 0 }),
+    angularVelocity: () => rates,
+    twistToggled: () => {
+      const t = toggle;
+      toggle = false;
+      return t;
+    },
+    resetKey: () => false,
+    status: () => ({ label: 'bot', connected: true }),
+  };
+  const dt = 1 / 60;
+  for (let t = 0; t < seconds - 1e-9; t += dt) game.update(dt, input);
+  toggle = true;
+  const idle: InputSource = { ...input, angularVelocity: () => [0, 0, 0] };
+  game.update(dt, idle);
+  if (game.twistMode) throw new Error('bot: failed to leave twist mode');
+}
+
+/** Waypoints through a room route that may revisit rooms (e.g. pillar loops). */
+export function routeWaypoints(game: Game, rooms: number[]): Vec3[] {
+  return waypoints(game, rooms);
+}
+
+/** Lets the simulation run with no input for `seconds`. */
+export function idle(game: Game, seconds: number): void {
+  const input: InputSource = {
+    tilt: () => ({ x: 0, y: 0 }),
+    angularVelocity: () => [0, 0, 0],
+    twistToggled: () => false,
+    resetKey: () => false,
+    status: () => ({ label: 'bot', connected: true }),
+  };
+  for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60, input);
+}

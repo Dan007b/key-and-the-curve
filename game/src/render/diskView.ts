@@ -76,6 +76,7 @@ export class DiskView {
   diskRadiusPx = 1;
   /** Disk centre in CSS pixels. */
   centerPx = { x: 0, y: 0 };
+  private size = { width: 1, height: 1 };
 
   private world: World | null = null;
   private spec: LevelSpec | null = null;
@@ -172,6 +173,7 @@ export class DiskView {
   /** Fits the disk into the canvas, leaving a small margin. */
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
+    this.size = { width, height };
     const margin = 1.04;
     const aspect = width / height;
     if (aspect >= 1) {
@@ -271,6 +273,9 @@ export class DiskView {
     this.twistRing.visible = state.twistMode;
     (this.twistRing.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.4 * pulse;
 
+    // The renderer is shared with the key inset, so restore our viewport and clear colour.
+    this.renderer.setViewport(0, 0, this.size.width, this.size.height);
+    this.renderer.setClearColor(COLORS.background, 1);
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
   }

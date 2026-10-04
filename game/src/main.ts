@@ -5,10 +5,11 @@ import { lorentzInverse } from './math/lorentz';
 import { DiskView } from './render/diskView';
 import type { ViewState } from './render/diskView';
 import { Hud } from './render/hud';
+import { KeyView } from './render/keyView';
 import { KeyboardInput } from './input/KeyboardInput';
 import { SerialInput } from './input/SerialInput';
 import { CombinedInput } from './input/CombinedInput';
-import { Game } from './game/game';
+import { FIT_SCALE, Game } from './game/game';
 import { LEVELS } from './game/level';
 
 const app = document.getElementById('app');
@@ -24,6 +25,10 @@ const keyboard = new KeyboardInput(canvas, () => view.diskRadiusPx);
 const serial = new SerialInput();
 const input = new CombinedInput(keyboard, serial);
 const game = new Game();
+const keyView = new KeyView();
+let insetSize = 240;
+const INSET_MARGIN = 16;
+let markedPosts = new Set<number>();
 
 let levelIndex = 0;
 let paused = true;
@@ -33,6 +38,7 @@ function startLevel(index: number): void {
   const spec = LEVELS[index];
   game.load(spec);
   view.setLevel(game.level.world, spec, game.settings.marble.radius);
+  markedPosts = new Set((spec.markedPillars ?? []).map(([t, k]) => game.level.world.roomPosts[t][k]));
   hud.setLevel(index, spec.name, spec.hint);
   paused = true;
   hud.showCard(`Level ${index + 1} · ${spec.name}`, spec.intro, 'Start', () => {
@@ -70,22 +76,29 @@ if (SerialInput.supported()) {
 hud.button('Restart', 'Restart this level', () => startLevel(levelIndex));
 hud.button('Next level', 'Skip to the next level', () => startLevel((levelIndex + 1) % LEVELS.length));
 
-const resize = () => view.resize(window.innerWidth, window.innerHeight);
+const resize = () => {
+  view.resize(window.innerWidth, window.innerHeight);
+  insetSize = Math.round(Math.max(140, Math.min(270, Math.min(window.innerWidth, window.innerHeight) * 0.3)));
+  hud.setInset(insetSize, INSET_MARGIN);
+};
 window.addEventListener('resize', resize);
 resize();
 
 function viewState(): ViewState {
+  const glow = game.gates.map((_, i) => (game.gateReading?.index === i ? game.gateGlow() : 0));
   return {
     time: game.time,
     twistMode: game.twistMode,
-    gateGlow: [],
-    gateOpen: [],
-    highlightPosts: new Set(),
+    gateGlow: glow,
+    gateOpen: game.gates.map((g) => g.open),
+    highlightPosts: markedPosts,
   };
 }
 
 function draw(): void {
   view.render(lorentzInverse(game.viewFrame()), viewState());
+  keyView.update(game.key, game.gateReading?.ghost ?? null, performance.now() / 1000);
+  keyView.render(view.renderer, window.innerWidth - insetSize - INSET_MARGIN, INSET_MARGIN, insetSize);
 }
 
 function step(dt: number): void {
@@ -93,6 +106,8 @@ function step(dt: number): void {
   keyboard.twistMode = game.twistMode;
   if (paused) return;
   game.update(dt, input);
+  input.vibrate(game.gateGlow());
+  for (const _ of game.openedEvents.splice(0)) hud.flash('GATE OPEN');
   if (game.completed) {
     paused = true;
     const last = levelIndex === LEVELS.length - 1;
@@ -124,9 +139,9 @@ function tick(now: number): void {
     inputs: input.statuses(),
     twistMode: game.twistMode,
     twistAllowed: game.twistAllowed(),
-    holonomyDeg: (game.holonomy() * 180) / Math.PI,
-    fit: null,
-    fitThreshold: 0,
+    holonomyDeg: ((game.gateReading?.holonomy ?? game.holonomy()) * 180) / Math.PI,
+    fit: game.gateReading ? Math.max(0, 1 - game.gateReading.distance / FIT_SCALE) : null,
+    fitThreshold: 1 - game.settings.tolerance / FIT_SCALE,
   });
   requestAnimationFrame(tick);
 }
@@ -142,6 +157,18 @@ if (import.meta.env.DEV) {
       startLevel(index);
       hud.hideCard();
       paused = false;
+    },
+    /** Puts the marble at a room's centre, carrying the key along the direct route. */
+    __teleport(room: number) {
+      const ref = game.level.references[room];
+      if (!ref) throw new Error(`room ${room} is not in the maze`);
+      game.marble.frame = [...ref] as typeof ref;
+      game.marble.vel = [0, 0];
+      game.carry = [...ref] as typeof ref;
+      game.room = room;
+      game.cameraOffset = 0;
+      game.rebuildColliders();
+      draw();
     },
     /** Advances the simulation by `seconds` in 60 Hz steps and redraws. */
     __advance(seconds: number) {

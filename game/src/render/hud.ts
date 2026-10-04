@@ -39,6 +39,9 @@ export class Hud {
   private readonly fitBar: HTMLDivElement;
   private readonly fitMark: HTMLDivElement;
   private readonly overlay: HTMLDivElement;
+  private readonly inset: HTMLDivElement;
+  private readonly toast: HTMLDivElement;
+  private toastTimer = 0;
   private overlayAction: (() => void) | null = null;
 
   constructor(parent: HTMLElement) {
@@ -57,6 +60,12 @@ export class Hud {
     this.fitBar = el('div', 'hud-fit-bar', track);
     this.fitMark = el('div', 'hud-fit-mark', track);
     this.buttons = el('div', 'hud-buttons', this.root);
+    this.inset = el('div', 'hud-inset', this.root);
+    el('div', 'hud-inset-label', this.inset, '4D key');
+    const legend = el('div', 'hud-inset-legend', this.inset);
+    for (const [axis, cls] of [['x', 'ax-x'], ['y', 'ax-y'], ['z', 'ax-z'], ['w', 'ax-w']]) el('span', cls, legend, axis);
+    el('span', 'ax-bit', legend, '● bit');
+    this.toast = el('div', 'hud-toast hidden', this.root);
     this.overlay = el('div', 'overlay hidden', parent);
 
     window.addEventListener('keydown', (e) => {
@@ -76,6 +85,20 @@ export class Hud {
       b.blur();
     });
     return b;
+  }
+
+  /** Positions the frame drawn around the key inset (size in CSS px). */
+  setInset(size: number, margin: number): void {
+    this.root.style.setProperty('--inset-size', `${size}px`);
+    this.root.style.setProperty('--inset-margin', `${margin}px`);
+  }
+
+  /** Shows a short message in the middle of the screen for a moment. */
+  flash(text: string): void {
+    this.toast.textContent = text;
+    this.toast.classList.remove('hidden');
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => this.toast.classList.add('hidden'), 1600);
   }
 
   setLevel(index: number, name: string, hint: string): void {

@@ -1,0 +1,227 @@
+/**
+ * Four-dimensional rotations for the key (CLAUDE.md §6.7).
+ *
+ * 4×4 matrices are row-major 16-element arrays. Axes are x, y, z, w = 0..3.
+ * A rotation "in the XW plane" turns x towards w and leaves y and z fixed;
+ * in 4D, rotations happen in planes, not about axes.
+ */
+
+export type Mat4 = number[];
+export type Vec4 = [number, number, number, number];
+export type Plane = 'xy' | 'xz' | 'xw' | 'yz' | 'yw' | 'zw';
+
+export const PLANES: Record<Plane, [number, number]> = {
+  xy: [0, 1],
+  xz: [0, 2],
+  xw: [0, 3],
+  yz: [1, 2],
+  yw: [1, 3],
+  zw: [2, 3],
+};
+
+export function identity4(): Mat4 {
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+}
+
+export function mul4(a: readonly number[], b: readonly number[]): Mat4 {
+  const out = new Array<number>(16);
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[r * 4 + k] * b[k * 4 + c];
+      out[r * 4 + c] = s;
+    }
+  }
+  return out;
+}
+
+export function transpose4(m: readonly number[]): Mat4 {
+  const out = new Array<number>(16);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) out[c * 4 + r] = m[r * 4 + c];
+  return out;
+}
+
+export function apply4(m: readonly number[], v: Readonly<Vec4>): Vec4 {
+  const out: Vec4 = [0, 0, 0, 0];
+  for (let r = 0; r < 4; r++) out[r] = m[r * 4] * v[0] + m[r * 4 + 1] * v[1] + m[r * 4 + 2] * v[2] + m[r * 4 + 3] * v[3];
+  return out;
+}
+
+/** Determinant by cofactor expansion (fine for 4×4). */
+export function det4(m: readonly number[]): number {
+  const minor3 = (rows: number[], cols: number[]) => {
+    const g = (i: number, j: number) => m[rows[i] * 4 + cols[j]];
+    return (
+      g(0, 0) * (g(1, 1) * g(2, 2) - g(1, 2) * g(2, 1)) -
+      g(0, 1) * (g(1, 0) * g(2, 2) - g(1, 2) * g(2, 0)) +
+      g(0, 2) * (g(1, 0) * g(2, 1) - g(1, 1) * g(2, 0))
+    );
+  };
+  let d = 0;
+  for (let c = 0; c < 4; c++) {
+    const cols = [0, 1, 2, 3].filter((x) => x !== c);
+    d += (c % 2 === 0 ? 1 : -1) * m[c] * minor3([1, 2, 3], cols);
+  }
+  return d;
+}
+
+/** Rotation by `angle` in a plane, turning its first axis towards its second. */
+export function planeRotation(plane: Plane, angle: number): Mat4 {
+  const [i, j] = PLANES[plane];
+  const m = identity4();
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  m[i * 4 + i] = c;
+  m[i * 4 + j] = -s;
+  m[j * 4 + i] = s;
+  m[j * 4 + j] = c;
+  return m;
+}
+
+/**
+ * The antisymmetric generator E of a plane: exp(θE) = planeRotation(plane, θ).
+ * E has −1 at (i, j) and +1 at (j, i).
+ */
+export function generator(plane: Plane): Mat4 {
+  const [i, j] = PLANES[plane];
+  const m = new Array<number>(16).fill(0);
+  m[i * 4 + j] = -1;
+  m[j * 4 + i] = 1;
+  return m;
+}
+
+/**
+ * A rotation given as a list of plane rotations in degrees, applied in order
+ * (the first entry acts first): [[p1, a1], [p2, a2]] → R₂·R₁.
+ */
+export function rotationFromList(list: readonly (readonly [Plane, number])[]): Mat4 {
+  let r = identity4();
+  for (const [plane, deg] of list) r = mul4(planeRotation(plane, (deg * Math.PI) / 180), r);
+  return r;
+}
+
+/**
+ * One twist-mode step: K ← exp(dt·(ω₀E_xw + ω₁E_yw + ω₂E_zw))·K.
+ *
+ * The exponential is approximated by the product of the three plane
+ * rotations. The two differ by the commutator terms, of order dt²·|ω|²/2:
+ * about 1e-3 rad per frame at 60 FPS even when twisting on two axes at
+ * 3 rad/s. That is a slightly different path, not drift: the product is still
+ * an exact rotation, and K is re-orthonormalized every frame anyway.
+ */
+export function twistStep(k: readonly number[], rates: readonly [number, number, number], dt: number): Mat4 {
+  const step = mul4(planeRotation('xw', rates[0] * dt), mul4(planeRotation('yw', rates[1] * dt), planeRotation('zw', rates[2] * dt)));
+  return reorthonormalize4(mul4(step, k));
+}
+
+/**
+ * Nearest rotation by Gram–Schmidt on the rows (they are orthonormal for an
+ * exact rotation). Fixes float drift; keeps det = +1 by flipping the last row
+ * if a large error ever flipped orientation.
+ */
+export function reorthonormalize4(m: readonly number[]): Mat4 {
+  const rows: number[][] = [0, 1, 2, 3].map((r) => m.slice(r * 4, r * 4 + 4));
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < i; j++) {
+      const d = rows[i].reduce((s, x, k) => s + x * rows[j][k], 0);
+      rows[i] = rows[i].map((x, k) => x - d * rows[j][k]);
+    }
+    const n = Math.hypot(...rows[i]);
+    rows[i] = rows[i].map((x) => x / n);
+  }
+  const out = rows.flat();
+  if (det4(out) < 0) for (let k = 12; k < 16; k++) out[k] = -out[k];
+  return out;
+}
+
+/** Frobenius distance ‖a − b‖_F. */
+export function frobenius(a: readonly number[], b: readonly number[]): number {
+  let s = 0;
+  for (let i = 0; i < 16; i++) s += (a[i] - b[i]) ** 2;
+  return Math.sqrt(s);
+}
+
+/**
+ * The hyperoctahedral group B₄: every signed permutation matrix, the full
+ * symmetry group of the tesseract (4!·2⁴ = 384 elements). With
+ * `rotationsOnly`, the 192 with det = +1 (the rotations, B₄⁺).
+ */
+export function hyperoctahedralGroup(rotationsOnly = true): Mat4[] {
+  const perms: number[][] = [];
+  const permute = (prefix: number[], rest: number[]) => {
+    if (rest.length === 0) perms.push(prefix);
+    rest.forEach((x, i) => permute([...prefix, x], [...rest.slice(0, i), ...rest.slice(i + 1)]));
+  };
+  permute([], [0, 1, 2, 3]);
+  const group: Mat4[] = [];
+  for (const p of perms) {
+    for (let signs = 0; signs < 16; signs++) {
+      const m = new Array<number>(16).fill(0);
+      p.forEach((col, row) => {
+        m[row * 4 + col] = (signs >> row) & 1 ? -1 : 1;
+      });
+      if (!rotationsOnly || det4(m) > 0) group.push(m);
+    }
+  }
+  return group;
+}
+
+/**
+ * How far orientation K is from fitting `target`, given the key's symmetries:
+ * min over S of ‖K − S·target‖_F (CLAUDE.md §6.7).
+ *
+ * An unmarked tesseract would use all of B₄⁺, but B₄⁺ contains every 90°
+ * plane rotation, so a 90° twist would fit without doing anything. The game's
+ * key is marked (coloured axes and one marked corner), so its only symmetry
+ * is the identity, which is the default here.
+ */
+export function fitDistance(k: readonly number[], target: readonly number[], symmetries: readonly Mat4[] = [identity4()]): number {
+  let best = Infinity;
+  for (const s of symmetries) best = Math.min(best, frobenius(k, mul4(s, target)));
+  return best;
+}
+
+/** Fit distance of a single-plane rotation by `angle` from the identity: 2√2·|sin(angle/2)|. */
+export function planeAngleToFit(angle: number): number {
+  return 2 * Math.SQRT2 * Math.abs(Math.sin(angle / 2));
+}
+
+// ---- The tesseract -----------------------------------------------------------
+
+/** The 16 vertices (±1, ±1, ±1, ±1). Vertex i has coordinate k = +1 iff bit k of i is set. */
+export const TESSERACT_VERTICES: Vec4[] = Array.from({ length: 16 }, (_, i) =>
+  [0, 1, 2, 3].map((k) => ((i >> k) & 1 ? 1 : -1)) as Vec4,
+);
+
+/** The 32 edges: vertex pairs differing in exactly one coordinate, with that axis. */
+export const TESSERACT_EDGES: { a: number; b: number; axis: number }[] = (() => {
+  const edges: { a: number; b: number; axis: number }[] = [];
+  for (let i = 0; i < 16; i++) {
+    for (let k = 0; k < 4; k++) {
+      const j = i ^ (1 << k);
+      if (i < j) edges.push({ a: i, b: j, axis: k });
+    }
+  }
+  return edges;
+})();
+
+/** Index of the marked corner, (+1, +1, +1, +1): the key's "bit". */
+export const MARKED_VERTEX = 15;
+
+/**
+ * Perspective projection from 4D to 3D, looking along w from w = d:
+ * (x, y, z) · s/(d − w). Points nearer the viewer (larger w) appear larger,
+ * which is how the inner and outer cubes of the familiar picture arise.
+ */
+export function project4to3(v: Readonly<Vec4>, d = 3, s = 1.6): [number, number, number] {
+  const f = s / (d - v[3]);
+  return [v[0] * f, v[1] * f, v[2] * f];
+}
+
+/**
+ * Moves K a fraction `alpha` of the way towards `target` and re-squares it.
+ * Used to snap the key smoothly into a gate.
+ */
+export function approach(k: readonly number[], target: readonly number[], alpha: number): Mat4 {
+  return reorthonormalize4(k.map((x, i) => x + alpha * (target[i] - x)));
+}
